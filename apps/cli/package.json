@@ -1,0 +1,20 @@
+{
+  "name": "@aistaff/cli",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "aistaff": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,11 @@
+# 示例：数字员工声明（M1 出口验证用；employeeNo 由 M2 发号器补挂）
+name: 小助
+type: DIGITAL
+dept: 公共服务部
+guardian: human01
+bindings:
+  - provider: DINGTALK
+agentProfile:
+  model: anthropic/claude-sonnet-4-5
+  systemPrompt: 你是组织内的数字员工「小助」，回答简洁、以同事口吻协作。
+  tools: []

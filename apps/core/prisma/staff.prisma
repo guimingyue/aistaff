@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/staff"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../../../data/staff.db"
+}
+
+model Employee {
+  id                 String  @id @default(cuid())
+  /// 工号：M2 发号实现前允许为空；一经发放永不变更、不复用
+  employeeNo         String? @unique
+  /// 声明式配置标识（config/employees/ 文件名，reconcile 幂等键）
+  configKey          String  @unique
+  type               String // HUMAN | DIGITAL
+  name               String
+  dept               String?
+  reportsTo          String?
+  guardianEmployeeNo String?
+  status             String  @default("ACTIVE") // ACTIVE | SUSPENDED | OFFBOARDED
+
+  bindings     ExternalBinding[]
+  agentProfile AgentProfile?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt()
+}
+
+model ExternalBinding {
+  id            String  @id @default(cuid())
+  employeeId    String
+  provider      String // DINGTALK | FEISHU（模型层扩展点）
+  externalUserId String?
+  bindingStatus String   @default("PENDING") // PENDING | BOUND | UNBOUND
+  cliProfileDir String?
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, provider])
+}
+
+model AgentProfile {
+  id           String  @id @default(cuid())
+  employeeId   String  @unique
+  systemPrompt String?
+  model        String?
+  params       String? // JSON 字符串（应用层校验；升级 PG 时换原生 JSON）
+  tools        String? // JSON 字符串数组
+  status       String  @default("ENABLED") // ENABLED | DISABLED
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+}

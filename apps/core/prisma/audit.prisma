@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/audit"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../../../data/audit.db"
+}
+
+/// 追加写，禁止 UPDATE/DELETE（应用层纪律）
+model AuditEvent {
+  id     Int      @id @default(autoincrement())
+  ts     DateTime @default(now())
+  actor  String // 操作者工号 / system
+  action String // config.reconcile.upsert | config.reconcile.remove | ...
+  target String // employeeNo / configKey / ...
+  detail String? // JSON 字符串
+
+  @@index([ts])
+}
