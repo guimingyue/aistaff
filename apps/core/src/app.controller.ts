@@ -1,9 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ConfigSyncService } from './config/config-sync.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly configSync: ConfigSyncService) {}
+  constructor(@Inject(ConfigSyncService) private readonly configSync: ConfigSyncService) {}
 
   @Get('health')
   health() {

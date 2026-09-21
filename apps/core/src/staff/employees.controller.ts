@@ -1,12 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { StaffService } from './staff.service';
 import { AuditService } from '../audit/audit.service';
 
 @Controller()
 export class EmployeesController {
   constructor(
-    private readonly staff: StaffService,
-    private readonly audit: AuditService,
+    @Inject(StaffService) private readonly staff: StaffService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   @Get('employees')

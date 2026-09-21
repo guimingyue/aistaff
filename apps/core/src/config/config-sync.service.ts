@@ -1,5 +1,5 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { promises as fs } from 'fs';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { promises as fs, watch as fsWatch, type FSWatcher } from 'fs';
 import * as path from 'path';
 import * as YAML from 'yaml';
 import { employeeConfigSchema, EmployeeConfig } from './employee-config.schema';
@@ -13,19 +13,19 @@ export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
   );
 
   private readonly logger = new Logger(ConfigSyncService.name);
-  private watcher?: fs.FSWatcher;
+  private watcher?: FSWatcher;
   private debounce?: NodeJS.Timeout;
   private syncing: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly staff: StaffService,
-    private readonly audit: AuditService,
+    @Inject(StaffService) private readonly staff: StaffService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   async onModuleInit() {
     await this.sync();
     await fs.mkdir(this.configDir, { recursive: true });
-    this.watcher = fs.watch(this.configDir, { recursive: true }, () => {
+    this.watcher = fsWatch(this.configDir, { recursive: true }, () => {
       if (this.debounce) clearTimeout(this.debounce);
       this.debounce = setTimeout(() => {
         this.syncing = this.syncing.then(() => this.sync()).catch((err) => this.logger.error(err));
