@@ -5,7 +5,13 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:../../../data/staff.db"
+  url      = env("AISTAFF_STAFF_DATABASE_URL")
+}
+
+/// 发号序列表：DIGITAL / HUMAN 双独立序列，单调递增，永不回退（工号永不复用）
+model Sequence {
+  name  String @id // DIGITAL | HUMAN
+  value Int    @default(0)
 }
 
 model Employee {

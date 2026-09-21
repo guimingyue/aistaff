@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { Command } from 'commander';
-import { coreRequest } from './http';
+import { corePatch, coreRequest } from './http';
 
 const program = new Command();
 program.name('aistaff').description('aistaff 数字员工平台管理命令行').version('0.0.0');
@@ -41,6 +41,25 @@ program
         }
       }),
   );
+
+const employee = program.command('employee').description('员工状态操作（按工号）');
+for (const [verb, status, desc] of [
+  ['start', 'ACTIVE', '启用（SUSPENDED → ACTIVE）'],
+  ['stop', 'SUSPENDED', '停用（ACTIVE → SUSPENDED）'],
+  ['offboard', 'OFFBOARDED', '离职（终态，工号永久保留）'],
+] as const) {
+  employee
+    .command(verb)
+    .argument('<employeeNo>', '工号')
+    .description(desc)
+    .action(async (employeeNo: string) => {
+      const result = await corePatch<{ employeeNo: string; status: string }>(
+        `/employees/${encodeURIComponent(employeeNo)}/status`,
+        { status },
+      );
+      console.log(`${result.employeeNo} → ${result.status}`);
+    });
+}
 
 program
   .command('audit')

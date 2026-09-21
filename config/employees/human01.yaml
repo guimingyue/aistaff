@@ -1,0 +1,5 @@
+name: 张三
+type: HUMAN
+dept: 平台组
+bindings:
+  - provider: DINGTALK

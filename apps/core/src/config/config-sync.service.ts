@@ -40,7 +40,7 @@ export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
 
   async sync(): Promise<void> {
     const declared = await this.loadConfigs();
-    const removed = await this.staff.syncFromConfigs(declared);
+    const { removed, rejected } = await this.staff.syncFromConfigs(declared);
     for (const [configKey, cfg] of declared) {
       await this.audit.record({
         actor: 'system',
@@ -52,7 +52,16 @@ export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
     for (const configKey of removed) {
       await this.audit.record({ actor: 'system', action: 'config.reconcile.remove', target: configKey });
     }
-    this.logger.log(`reconcile done: ${declared.size} declared, ${removed.length} removed`);
+    for (const r of rejected) {
+      await this.audit.record({
+        actor: 'system',
+        action: 'config.reconcile.reject',
+        target: r.configKey,
+        detail: { reason: r.reason },
+      });
+      this.logger.warn(`reject ${r.configKey}: ${r.reason}`);
+    }
+    this.logger.log(`reconcile done: ${declared.size} declared, ${removed.length} removed, ${rejected.length} rejected`);
   }
 
   private async loadConfigs(): Promise<Map<string, EmployeeConfig>> {
