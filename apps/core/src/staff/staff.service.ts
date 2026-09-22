@@ -107,16 +107,27 @@ export class StaffService {
         });
 
         for (const binding of cfg.bindings ?? []) {
+          const existingBinding = await tx.externalBinding.findUnique({
+            where: { employeeId_provider: { employeeId: employee.id, provider: binding.provider } },
+          });
+          // M3 纪律：BOUND 只能由 connection.bind 的只读校验产生；
+          // 声明预填一律 PENDING，已绑定账号的 externalUserId 变更则降级回 PENDING。
+          const prefilledBindingStatus =
+            existingBinding?.bindingStatus === 'BOUND' &&
+              existingBinding.externalUserId !== binding.externalUserId
+              ? 'PENDING'
+              : (existingBinding?.bindingStatus ?? 'PENDING');
           await tx.externalBinding.upsert({
             where: { employeeId_provider: { employeeId: employee.id, provider: binding.provider } },
             create: {
               employeeId: employee.id,
               provider: binding.provider,
               externalUserId: binding.externalUserId,
-              bindingStatus: binding.externalUserId ? 'BOUND' : 'PENDING',
+              bindingStatus: 'PENDING',
             },
             update: {
               externalUserId: binding.externalUserId,
+              bindingStatus: prefilledBindingStatus,
             },
           });
         }

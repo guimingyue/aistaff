@@ -1,7 +1,16 @@
 packages:
   - "apps/*"
 allowBuilds:
+  '@google/genai': true
   '@prisma/client': true
   '@prisma/engines': true
   esbuild: true
   prisma: true
+  protobufjs: true
+minimumReleaseAgeExclude:
+  - '@earendil-works/chord@0.87.0'
+  - '@earendil-works/pi-agent-core@0.87.0'
+  - '@earendil-works/pi-ai@0.87.0'
+  - '@earendil-works/pi-coding-agent@0.87.0'
+  - '@earendil-works/pi-telemetry@0.87.0'
+  - '@earendil-works/pi-tui@0.87.0'

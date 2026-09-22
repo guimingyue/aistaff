@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { Command } from 'commander';
-import { corePatch, coreRequest } from './http';
+import { corePatch, corePost, coreRequest } from './http';
 
 const program = new Command();
 program.name('aistaff').description('aistaff 数字员工平台管理命令行').version('0.0.0');
@@ -60,6 +60,52 @@ for (const [verb, status, desc] of [
       console.log(`${result.employeeNo} → ${result.status}`);
     });
 }
+
+program
+  .command('login')
+  .description('托管员工 CLI 登录（登录态存入员工专属 profile 目录）')
+  .argument('<employeeNo>', '工号')
+  .option('--provider <provider>', 'DINGTALK | FEISHU', 'DINGTALK')
+  .action(async (employeeNo: string, opts: { provider: string }) => {
+    const result = await corePost<{ exitCode: number }>(
+      `/employees/${encodeURIComponent(employeeNo)}/login`,
+      { provider: opts.provider },
+    );
+    console.log(`login exit=${result.exitCode}`);
+    process.exitCode = result.exitCode === 0 ? 0 : 1;
+  });
+
+program
+  .command('bind')
+  .description('预填 externalUserId 并经 CLI 只读校验（存在 + 姓名匹配 → BOUND）')
+  .argument('<employeeNo>', '工号')
+  .requiredOption('--provider <provider>', 'DINGTALK | FEISHU')
+  .requiredOption('--external-user-id <id>', '三方通讯录账号 ID')
+  .action(
+    async (
+      employeeNo: string,
+      opts: { provider: string; externalUserId: string },
+    ) => {
+      const r = await corePost<{ bindingStatus: string; verifiedName?: string }>(
+        `/employees/${encodeURIComponent(employeeNo)}/bind`,
+        { provider: opts.provider, externalUserId: opts.externalUserId },
+      );
+      console.log(`${employeeNo} ${opts.provider} → ${r.bindingStatus} (三方姓名: ${r.verifiedName})`);
+    },
+  );
+
+program
+  .command('connection')
+  .description('查看员工绑定与登录态')
+  .argument('<employeeNo>', '工号')
+  .option('--provider <provider>', '仅看指定 provider')
+  .action(async (employeeNo: string, opts: { provider?: string }) => {
+    const q = opts.provider ? `?provider=${encodeURIComponent(opts.provider)}` : '';
+    const info = await coreRequest<Record<string, unknown>>(
+      `/employees/${encodeURIComponent(employeeNo)}/connections${q}`,
+    );
+    console.log(JSON.stringify(info, null, 2));
+  });
 
 program
   .command('audit')
