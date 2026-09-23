@@ -32,7 +32,13 @@ export class ChatService {
   async chat(
     employeeNo: string,
     message: string,
-    opts: { actor: string; conversationId?: string; channel?: string },
+    opts: {
+      actor: string;
+      conversationId?: string;
+      channel?: string;
+      /** 三方会话标识（如钉钉 openConversationId）：同员工同通道同标识复用同一 Conversation */
+      externalConversationId?: string;
+    },
   ): Promise<ChatResult> {
     const startedAt = Date.now();
     const ctx: { conversationId?: string } = {};
@@ -56,7 +62,12 @@ export class ChatService {
   private async chatInner(
     employeeNo: string,
     message: string,
-    opts: { actor: string; conversationId?: string; channel?: string },
+    opts: {
+      actor: string;
+      conversationId?: string;
+      channel?: string;
+      externalConversationId?: string;
+    },
     startedAt: number,
     ctx: { conversationId?: string },
   ): Promise<ChatResult> {
@@ -82,9 +93,21 @@ export class ChatService {
         throw new Error(`会话 ${opts.conversationId} 不存在或不属于员工 ${employeeNo}`);
       }
     } else {
-      conversation = await this.prisma.sessions.conversation.create({
-        data: { employeeId: employee.id, channel: opts.channel ?? 'CONSOLE' },
-      });
+      const channel = opts.channel ?? 'CONSOLE';
+      if (opts.externalConversationId) {
+        conversation = await this.prisma.sessions.conversation.findFirst({
+          where: { employeeId: employee.id, channel, externalId: opts.externalConversationId },
+        });
+      }
+      if (!conversation) {
+        conversation = await this.prisma.sessions.conversation.create({
+          data: {
+            employeeId: employee.id,
+            channel,
+            externalId: opts.externalConversationId,
+          },
+        });
+      }
     }
     ctx.conversationId = conversation.id;
 

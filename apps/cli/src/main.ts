@@ -151,6 +151,36 @@ program
   });
 
 program
+  .command('listen')
+  .description('员工钉钉 @消息闭环：订阅→路由 Agent→自动回发')
+  .argument('<employeeNo>', '工号')
+  .option('--stop', '停止该员工的闭环')
+  .action(async (employeeNo: string, opts: { stop?: boolean }) => {
+    const verb = opts.stop ? 'stop' : 'start';
+    const r = await corePost<{ running: boolean }>(
+      `/employees/${encodeURIComponent(employeeNo)}/loop/${verb}`,
+      {},
+    );
+    console.log(`${employeeNo} loop → running=${r.running}`);
+  });
+
+program
+  .command('loops')
+  .description('查看运行中的消息闭环')
+  .action(async () => {
+    const loops = await coreRequest<Array<Record<string, unknown>>>('/loops');
+    if (loops.length === 0) {
+      console.log('（无运行中的闭环，用 aistaff listen <工号> 启动）');
+      return;
+    }
+    for (const l of loops) {
+      console.log(
+        `${l.employeeNo}  startedAt=${l.startedAt}  processed=${l.processed}  errors=${l.errors}  last=${String(l.lastDiagnostic ?? '-').slice(0, 80)}`,
+      );
+    }
+  });
+
+program
   .command('audit')
   .description('查看审计事件（最新在前）')
   .option('-n, --limit <number>', '条数', '20')
