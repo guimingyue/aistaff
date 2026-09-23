@@ -43,7 +43,7 @@ bash scripts/verify-m1.sh && bash scripts/verify-m2.sh \
 pnpm --filter @aistaff/core test
 ```
 
-真实链路（需人工配合，按需运行）：
+真实链路（需人工配合，按需运行；未闭环项与前置条件清单见 `TODO.md`）：
 
 已对真实 dws v1.0.54 完成契约核验（无需授权即可验证的部分）：`event schema user_im_message_receive_at --flatten` 字段与通道解析一一对应（type 恒为事件键、event_id 去重、sender_open_dingtalk_id 等），其中 `conversation_id` 即 `send --group` 所需 open_conversation_id，收发可直接闭环；不加 `--flatten` 输出为 transport envelope，我们的解析以 flatten 顶层字段为准；`chat message send` argv（含 `-y`）与 `--mock` 实测通过；未登录时 `auth status` 返回 `authenticated:false`（exit 0）、`contact user get`/`event consume` 均 exit 5 + JSON 错误（诊断会进 loop 审计）；停机纪律（SIGTERM/关 stdin，禁 kill -9，新建订阅退出即清理）与实现一致；设备授权链接格式与 live 脚本正则匹配。
 
