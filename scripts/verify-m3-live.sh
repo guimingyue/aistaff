@@ -45,6 +45,8 @@ echo "  ┌─ 请用浏览器/手机钉钉打开并确认 ───────
 echo "  │  $LINK"
 echo "  └──────────────────────────────────────────────────────┘"
 echo "（等待授权完成，最多 600s…）"
+echo "  注意：确认页所属组织以手机钉钉当前选中组织为准，且该组织须已开启"
+echo "  「允许成员通过 CLI 访问个人数据」（Step 4 若报 CLI data access is not enabled 即组织开关未开）"
 for i in $(seq 1 600); do
   dws_iso auth status -f json 2>/dev/null | grep -q '"authenticated": true' && break
   sleep 1
