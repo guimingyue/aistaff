@@ -74,8 +74,16 @@ export class DingtalkAdapter implements DirectoryAdapter {
   }
 
   /** 设备流：服务端进程无浏览器可用，授权链接/码经 core 日志与 CLI 转给员工本人。 */
-  loginInteractive(): Promise<number> {
-    return runCliInteractive(this.bin, ['auth', 'login', '--device'], this.env);
+  loginInteractive(orgProfile?: string): Promise<number> {
+    const args = ['auth', 'login', '--device'];
+    if (orgProfile) {
+      // argv 值若以 - 开头会被 CLI 解析成旗标；corpId 形态白名单收口
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(orgProfile)) {
+        throw new Error(`组织 ID 格式非法：${orgProfile.slice(0, 20)}`);
+      }
+      args.push('--profile', orgProfile);
+    }
+    return runCliInteractive(this.bin, args, this.env);
   }
 }
 

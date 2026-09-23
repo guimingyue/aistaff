@@ -66,10 +66,11 @@ program
   .description('托管员工 CLI 登录（登录态存入员工专属 profile 目录）')
   .argument('<employeeNo>', '工号')
   .option('--provider <provider>', 'DINGTALK | FEISHU', 'DINGTALK')
-  .action(async (employeeNo: string, opts: { provider: string }) => {
+  .option('--profile <corpId>', '指定授权目标组织 corpId（无需手机钉钉切换默认组织）')
+  .action(async (employeeNo: string, opts: { provider: string; profile?: string }) => {
     const result = await corePost<{ exitCode: number }>(
       `/employees/${encodeURIComponent(employeeNo)}/login`,
-      { provider: opts.provider },
+      { provider: opts.provider, profile: opts.profile },
     );
     console.log(`login exit=${result.exitCode}`);
     process.exitCode = result.exitCode === 0 ? 0 : 1;

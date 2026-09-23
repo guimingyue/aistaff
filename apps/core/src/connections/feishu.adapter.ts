@@ -19,7 +19,7 @@ export class FeishuAdapter implements DirectoryAdapter {
     this.refuse();
   }
 
-  loginInteractive(): Promise<number> {
+  loginInteractive(_orgProfile?: string): Promise<number> {
     this.refuse();
   }
 }

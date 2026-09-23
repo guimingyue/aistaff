@@ -17,10 +17,10 @@ export class ConnectionsController {
   @Post('employees/:employeeNo/login')
   async login(
     @Param('employeeNo') employeeNo: string,
-    @Body() body: { provider?: string },
+    @Body() body: { provider?: string; profile?: string },
   ) {
     const provider = body?.provider ?? 'DINGTALK';
-    return this.connections.login(employeeNo, provider, 'admin-cli');
+    return this.connections.login(employeeNo, provider, 'admin-cli', body?.profile);
   }
 
   @Post('employees/:employeeNo/bind')

@@ -26,7 +26,7 @@ cd apps/cli && pnpm exec tsx src/main.ts <command>
 | 命令 | 作用 |
 |---|---|
 | `health` / `employees list` / `employee <start\|stop\|offboard> <工号>` | 身份与状态机（工号唯一/不变/离职不复用） |
-| `login <工号>` / `bind <工号> --provider DINGTALK --external-user-id <id>` / `connection <工号>` | CLI 登录托管（每员工隔离 profile `data/cli-profiles/<工号>-DINGTALK`）+ 只读校验绑定 |
+| `login <工号> [--profile <corpId>]` / `bind <工号> --provider DINGTALK --external-user-id <id>` / `connection <工号>` | CLI 登录托管（每员工隔离 profile `data/cli-profiles/<工号>-DINGTALK`；`--profile` 定向授权组织，绕开手机默认组织限制）+ 只读校验绑定 |
 | `chat <工号> <消息...> [-c 会话id]` / `conversations <工号>` | pi-coding-agent 员工实例对话，会话持久化 sessions.db |
 | `listen <工号> [--stop]` / `loops` | 钉钉 @消息闭环：订阅→路由 Agent→自动回发（优雅停机 SIGTERM） |
 | `audit -n <条数>` | 追加写审计（状态/绑定/CLI/消息全链路） |

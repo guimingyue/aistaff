@@ -16,5 +16,5 @@ export interface DirectoryAdapter {
   readonly provider: 'DINGTALK' | 'FEISHU';
   authStatus(): Promise<AuthStatus>;
   verifyUser(externalUserId: string): Promise<DirectoryUser | null>;
-  loginInteractive(): Promise<number>;
+  loginInteractive(orgProfile?: string): Promise<number>;
 }

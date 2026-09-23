@@ -64,18 +64,18 @@ export class ConnectionsService {
   }
 
   /** CLI 登录托管：登录态落在该员工专属 profile 目录，平台不读取 token。 */
-  async login(employeeNo: string, provider: string, actor: string) {
+  async login(employeeNo: string, provider: string, actor: string, orgProfile?: string) {
     const employee = await this.requireEmployee(employeeNo);
     if (employee.status === 'OFFBOARDED') {
       throw new Error(`员工 ${employeeNo} 已离职，禁止登录`);
     }
     const adapter = this.adapter(provider, employeeNo);
-    const exitCode = await adapter.loginInteractive();
+    const exitCode = await adapter.loginInteractive(orgProfile);
     await this.audit.record({
       actor,
       action: 'connection.login',
       target: `${employeeNo}/${provider}`,
-      detail: { exitCode, profileDir: this.profileDir(employeeNo, provider) },
+      detail: { exitCode, profileDir: this.profileDir(employeeNo, provider), orgProfile },
     });
     return { employeeNo, provider, exitCode };
   }
