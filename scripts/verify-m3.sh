@@ -6,7 +6,11 @@ cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
 CORE_PID=""
-cleanup() { [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true; }
+cleanup() {
+  [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
+  # core 的 node 孙进程会先于包装器退出而存活并占住 3000，按端口兜底清理
+  for pid in $(lsof -ti tcp:3000 || true); do kill "$pid" 2>/dev/null || true; done
+}
 trap cleanup EXIT
 
 step() { echo; echo "== $*"; }

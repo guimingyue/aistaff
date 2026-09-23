@@ -10,7 +10,11 @@ FAKE_DWS="$PWD/apps/core/src/connections/testing/fake-dws.mjs"
 PROFILE=data/cli-profiles/AI000001-DINGTALK
 DWS_DIR="$PROFILE/.dws"
 CORE_PID=""
-cleanup() { [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true; }
+cleanup() {
+  [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
+  # core 的 node 孙进程会先于包装器退出而存活并占住 3000，按端口兜底清理
+  for pid in $(lsof -ti tcp:3000 || true); do kill "$pid" 2>/dev/null || true; done
+}
 trap cleanup EXIT
 
 step() { echo; echo "== $*"; }
