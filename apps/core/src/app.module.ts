@@ -4,10 +4,11 @@ import { AuditModule } from './audit/audit.module';
 import { ConfigModule } from './config/config.module';
 import { StaffModule } from './staff/staff.module';
 import { ConnectionsModule } from './connections/connections.module';
+import { AgentRuntimeModule } from './agent-runtime/agent-runtime.module';
 import { AppController } from './app.controller';
 
 @Module({
-  imports: [PrismaModule, AuditModule, ConfigModule, StaffModule, ConnectionsModule],
+  imports: [PrismaModule, AuditModule, ConfigModule, StaffModule, ConnectionsModule, AgentRuntimeModule],
   controllers: [AppController],
 })
 export class AppModule {}

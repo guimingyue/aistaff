@@ -108,6 +108,49 @@ program
   });
 
 program
+  .command('chat')
+  .description('与管理通道中的员工 Agent 对话（每轮均记审计）')
+  .argument('<employeeNo>', '工号')
+  .argument('<message...>', '消息内容')
+  .option('-c, --conversation <id>', '续用既有会话（缺省新建）')
+  .action(async (employeeNo: string, words: string[], opts: { conversation?: string }) => {
+    const result = await corePost<{
+      conversationId: string;
+      replyText: string;
+      modelUsed?: string;
+      durationMs: number;
+    }>(`/employees/${encodeURIComponent(employeeNo)}/chat`, {
+      message: words.join(' '),
+      conversationId: opts.conversation,
+    });
+    console.log(`[${result.conversationId}${result.modelUsed ? ` ${result.modelUsed}` : ''}] ${result.replyText}`);
+  });
+
+program
+  .command('conversations')
+  .description('查看员工会话与消息（sessions 库）')
+  .argument('<employeeNo>', '工号')
+  .action(async (employeeNo: string) => {
+    const info = await coreRequest<{
+      agentEnabled: boolean;
+      conversations: Array<{
+        id: string;
+        channel: string | null;
+        createdAt: string;
+        agentSessionFile: string | null;
+        messages: Array<{ role: string; content: string; createdAt: string }>;
+      }>;
+    }>(`/employees/${encodeURIComponent(employeeNo)}/conversations`);
+    console.log(`agentEnabled=${info.agentEnabled}  conversations=${info.conversations.length}`);
+    for (const c of info.conversations) {
+      console.log(`\n会话 ${c.id} (${c.channel}, ${c.messages.length} 条)`);
+      for (const m of c.messages) {
+        console.log(`  ${m.role}: ${m.content.length > 120 ? `${m.content.slice(0, 120)}…` : m.content}`);
+      }
+    }
+  });
+
+program
   .command('audit')
   .description('查看审计事件（最新在前）')
   .option('-n, --limit <number>', '条数', '20')

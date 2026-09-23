@@ -5,15 +5,18 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:../../../data/sessions.db"
+  url      = env("AISTAFF_SESSIONS_DATABASE_URL")
 }
 
 model Conversation {
-  id         String   @id @default(cuid())
-  employeeId String
-  channel    String? // DINGTALK | FEISHU | CONSOLE
-  externalId String? // 三方会话/群标识
-  createdAt  DateTime @default(now())
+  id               String   @id @default(cuid())
+  employeeId       String
+  channel          String? // DINGTALK | FEISHU | CONSOLE
+  externalId       String? // 三方会话/群标识
+  /// pi Agent 会话档案（jsonl 文件路径），用于跨轮次上下文延续
+  agentSessionFile String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   messages Message[]
 
