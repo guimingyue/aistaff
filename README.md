@@ -47,6 +47,6 @@ pnpm --filter @aistaff/core test
 
 已对真实 dws v1.0.54 完成契约核验（无需授权即可验证的部分）：`event schema user_im_message_receive_at --flatten` 字段与通道解析一一对应（type 恒为事件键、event_id 去重、sender_open_dingtalk_id 等），其中 `conversation_id` 即 `send --group` 所需 open_conversation_id，收发可直接闭环；不加 `--flatten` 输出为 transport envelope，我们的解析以 flatten 顶层字段为准；`chat message send` argv（含 `-y`）与 `--mock` 实测通过；未登录时 `auth status` 返回 `authenticated:false`（exit 0）、`contact user get`/`event consume` 均 exit 5 + JSON 错误（诊断会进 loop 审计）；停机纪律（SIGTERM/关 stdin，禁 kill -9，新建订阅退出即清理）与实现一致；设备授权链接格式与 live 脚本正则匹配。
 
-- `bash scripts/verify-m3-live.sh` — 真实钉钉设备授权 + 只读校验绑定（手机钉钉确认授权链接）
-- `bash scripts/verify-m5-live.sh` — Golden Path：小助 profile 登录后 `listen`，同事群内 @小助 收自动回复；设 `AISTAFF_MODEL_API_KEY` 则走真模型，否则 echo 桩并明示降级
+- `bash scripts/verify-m3-live.sh` — 真实钉钉设备授权 + 只读校验绑定（**2026-09-25 已在 Chating 组织实测闭环**：login→BOUND，姓名精确匹配「小助」；托管环境经 `DWS_DISABLE_KEYCHAIN` 走文件 DEK）
+- `bash scripts/verify-m5-live.sh` — Golden Path：小助 profile 登录后 `listen`，同事群内 @小助 收自动回复；设 `AISTAFF_MODEL_API_KEY` 则走真模型，否则 echo 桩并明示降级（2026-09-25 实测：订阅建立与真实出站回发已通；**同账号自 @ 确认不触发事件**，仅剩"他人 @"一跳需第二钉钉身份，见 TODO.md）
 - 真实模型对话：设置 Key 后重跑 `verify-m4.sh` step 6（PROBE_BLOCKED → PROBE_OK）
