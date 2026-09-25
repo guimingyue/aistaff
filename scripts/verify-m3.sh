@@ -5,6 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
+# 隔离数据目录：自动验证不污染开发库与真实登录 profile（audit.db 仍固定追加仓库 data/）
+DATA_DIR="$(mktemp -d)/aistaff-data"
+mkdir -p "$DATA_DIR"
+export AISTAFF_DATA_DIR="$DATA_DIR"
+export AISTAFF_STAFF_DATABASE_URL="file:$DATA_DIR/staff.db"
+export AISTAFF_SESSIONS_DATABASE_URL="file:$DATA_DIR/sessions.db"
 CORE_PID=""
 cleanup() {
   [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
@@ -20,6 +26,8 @@ cli() { (cd apps/cli && pnpm exec tsx src/main.ts "$@"); }
 step "0/5 释放 3000 端口并启动 core"
 for pid in $(lsof -ti tcp:3000 || true); do kill "$pid" 2>/dev/null || true; done
 sleep 1
+(cd apps/core && pnpm exec prisma db push --schema prisma/staff.prisma --skip-generate > /dev/null 2>&1 \
+  && pnpm exec prisma db push --schema prisma/sessions.prisma --skip-generate > /dev/null 2>&1) || fail "临时库 schema 初始化失败"
 (cd apps/core && pnpm start > /tmp/aistaff-core.log 2>&1) &
 CORE_PID=$!
 for i in $(seq 1 30); do
@@ -36,7 +44,7 @@ echo "$out" | grep -q '"authenticated": false' || fail "新隔离 profile 应未
 echo "$out" | grep -q 'cli-profiles/AI000001-DINGTALK' || fail "profile 目录未按员工隔离"
 
 step "2/5 profile 目录真实创建于隔离路径"
-[ -d data/cli-profiles/AI000001-DINGTALK/.dws ] || fail "缺少 data/cli-profiles/AI000001-DINGTALK/.dws"
+[ -d "$DATA_DIR/cli-profiles/AI000001-DINGTALK/.dws" ] || fail "缺少 $DATA_DIR/cli-profiles/AI000001-DINGTALK/.dws"
 
 step "3/5 未登录 bind -> 拒绝 + 审计"
 if cli bind AI000001 --provider DINGTALK --external-user-id 'x" && echo pwned' 2>/tmp/m3-bind.err; then

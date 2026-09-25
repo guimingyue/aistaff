@@ -6,8 +6,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
+# 隔离数据目录：自动验证不污染开发库与真实登录 profile（audit.db 仍固定追加仓库 data/）
+DATA_DIR="$(mktemp -d)/aistaff-data"
+mkdir -p "$DATA_DIR"
+export AISTAFF_DATA_DIR="$DATA_DIR"
+export AISTAFF_STAFF_DATABASE_URL="file:$DATA_DIR/staff.db"
+export AISTAFF_SESSIONS_DATABASE_URL="file:$DATA_DIR/sessions.db"
 FAKE_DWS="$PWD/apps/core/src/connections/testing/fake-dws.mjs"
-PROFILE=data/cli-profiles/AI000001-DINGTALK
+PROFILE="$DATA_DIR/cli-profiles/AI000001-DINGTALK"
 DWS_DIR="$PROFILE/.dws"
 CORE_PID=""
 cleanup() {
@@ -25,12 +31,13 @@ step "0/7 释放端口、布置假 dws profile 状态、启动 core（假CLI+ech
 chmod +x "$FAKE_DWS"
 for pid in $(lsof -ti tcp:3000 || true); do kill "$pid" 2>/dev/null || true; done
 sleep 1
-pnpm --filter @aistaff/core run db:push > /tmp/m5-push.log 2>&1 || { cat /tmp/m5-push.log; fail "db push 失败"; }
+(cd apps/core && pnpm exec prisma db push --schema prisma/staff.prisma --skip-generate > /dev/null 2>&1 \
+  && pnpm exec prisma db push --schema prisma/sessions.prisma --skip-generate > /dev/null 2>&1) || fail "临时库 schema 初始化失败"
 
 rm -rf "$DWS_DIR"
 mkdir -p "$DWS_DIR"
 # 幂等：清掉上一轮验证的 DINGTALK 测试会话
-sqlite3 data/sessions.db "DELETE FROM Message WHERE conversationId IN (SELECT id FROM Conversation WHERE externalId='cid-m5-group'); DELETE FROM Conversation WHERE externalId='cid-m5-group';"
+sqlite3 "$DATA_DIR/sessions.db" "DELETE FROM Message WHERE conversationId IN (SELECT id FROM Conversation WHERE externalId='cid-m5-group'); DELETE FROM Conversation WHERE externalId='cid-m5-group';"
 printf '{"ai-xz-001": "小助"}' > "$DWS_DIR/fake-users.json"
 cat > "$DWS_DIR/inbox.ndjson" <<'JSONL'
 {"type":"user_im_message_receive_at","event_id":"evt-m5-1","message_id":"om-1","conversation_id":"cid-m5-group","sender":"张三","sender_open_dingtalk_id":"open-zs","content":"小助，明天上午有什么安排？"}
@@ -69,9 +76,9 @@ grep -q 'm5-pwned' "$DWS_DIR/sent.ndjson" || fail "注入样本未原样回显"
 grep -c '"to":"cid-m5-group"' "$DWS_DIR/sent.ndjson" | grep -q '^3$' || fail "回发目标会话不正确"
 
 step "4/7 sessions.db：DINGTALK 会话复用与消息持久化"
-cnt=$(sqlite3 data/sessions.db "SELECT COUNT(*) FROM Conversation WHERE channel='DINGTALK' AND externalId='cid-m5-group';")
+cnt=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT COUNT(*) FROM Conversation WHERE channel='DINGTALK' AND externalId='cid-m5-group';")
 [ "$cnt" = "1" ] || fail "期望 1 条 DINGTALK 会话，实际 $cnt"
-msgs=$(sqlite3 data/sessions.db "SELECT COUNT(*) FROM Message m JOIN Conversation c ON m.conversationId=c.id WHERE c.externalId='cid-m5-group';")
+msgs=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT COUNT(*) FROM Message m JOIN Conversation c ON m.conversationId=c.id WHERE c.externalId='cid-m5-group';")
 [ "$msgs" = "4" ] || fail "期望 4 条消息（2问2答），实际 $msgs"
 
 step "5/7 审计链完整：loop.start / message.inbound×3 / agent.run / message.outbound×3"

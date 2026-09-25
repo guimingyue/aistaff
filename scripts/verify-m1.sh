@@ -5,6 +5,16 @@ cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
 TMP_EMP=config/employees/verify-tmp.yaml
+# 隔离数据目录：自动验证不污染开发库与真实登录 profile（audit.db 仍固定追加仓库 data/）
+DATA_DIR="$(mktemp -d)/aistaff-data"
+mkdir -p "$DATA_DIR"
+export AISTAFF_DATA_DIR="$DATA_DIR"
+export AISTAFF_STAFF_DATABASE_URL="file:$DATA_DIR/staff.db"
+export AISTAFF_SESSIONS_DATABASE_URL="file:$DATA_DIR/sessions.db"
+(cd apps/core && pnpm exec prisma db push --schema prisma/staff.prisma --skip-generate > /dev/null 2>&1 \
+  && pnpm exec prisma db push --schema prisma/sessions.prisma --skip-generate > /dev/null 2>&1) || { echo "db push 失败"; exit 1; }
+(cd apps/core && pnpm exec prisma db push --schema prisma/staff.prisma --skip-generate > /dev/null 2>&1 \
+  && pnpm exec prisma db push --schema prisma/sessions.prisma --skip-generate > /dev/null 2>&1) || fail "临时库 schema 初始化失败"
 CORE_PID=""
 cleanup() {
   [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true

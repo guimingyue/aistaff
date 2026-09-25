@@ -4,7 +4,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
-DB=data/staff.db
+# 隔离数据目录：自动验证不污染开发库与真实登录 profile（audit.db 仍固定追加仓库 data/）
+DATA_DIR="$(mktemp -d)/aistaff-data"
+mkdir -p "$DATA_DIR"
+export AISTAFF_DATA_DIR="$DATA_DIR"
+export AISTAFF_STAFF_DATABASE_URL="file:$DATA_DIR/staff.db"
+export AISTAFF_SESSIONS_DATABASE_URL="file:$DATA_DIR/sessions.db"
+DB="$DATA_DIR/staff.db"
 CORE_PID=""
 cleanup() {
   [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
@@ -39,10 +45,12 @@ row() { sqlite3 "$DB" "select employeeNo from Employee where configKey='$1';"; }
 echo "OK: 000001 / AI000001"
 
 step "3/6 幂等：再次 reconcile 工号不变"
+# 序列基线取当前值：m1 的 verify-tmp 曾合法消耗过号（跨脚本共享开发库），只断言本轮 reconcile 不再递增
+SEQ_BEFORE=$(sqlite3 "$DB" "select value from Sequence;")
 touch config/employees/xiaozhu.yaml
 sleep 4
 [ "$(row xiaozhu)" = "AI000001" ] || fail "reconcile 变更了工号"
-[ "$(sqlite3 "$DB" "select value from Sequence;")" = $'1\n1' ] || fail "序列被重复递增"
+[ "$(sqlite3 "$DB" "select value from Sequence;")" = "$SEQ_BEFORE" ] || fail "序列被重复递增"
 echo "OK: 工号与序列稳定"
 
 step "4/6 CLI 停用/启用数字员工"

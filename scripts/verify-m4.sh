@@ -5,6 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 API=http://127.0.0.1:3000
+# 隔离数据目录：自动验证不污染开发库与真实登录 profile（audit.db 仍固定追加仓库 data/）
+DATA_DIR="$(mktemp -d)/aistaff-data"
+mkdir -p "$DATA_DIR"
+export AISTAFF_DATA_DIR="$DATA_DIR"
+export AISTAFF_STAFF_DATABASE_URL="file:$DATA_DIR/staff.db"
+export AISTAFF_SESSIONS_DATABASE_URL="file:$DATA_DIR/sessions.db"
 CORE_PID=""
 cleanup() {
   [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
@@ -29,7 +35,8 @@ start_core() { # $1: extra env prefix description
 }
 
 step "0/6 库同步 + echo 桩模式启动 core"
-RUNNER_ENV="" pnpm --filter @aistaff/core run db:push > /tmp/m4-push.log 2>&1 || { cat /tmp/m4-push.log; fail "db push 失败"; }
+(cd apps/core && pnpm exec prisma db push --schema prisma/staff.prisma --skip-generate > /dev/null 2>&1 \
+  && pnpm exec prisma db push --schema prisma/sessions.prisma --skip-generate > /dev/null 2>&1) || fail "临时库 schema 初始化失败"
 RUNNER_ENV="AISTAFF_AGENT_RUNNER=echo"
 start_core
 
@@ -44,10 +51,10 @@ echo "$out2"
 echo "$out2" | grep -q "\[$CONV_ID" || fail "第二轮未续用同一会话"
 
 step "2/6 sessions.db：会话与四条消息持久化 + pi 会话档案回写"
-row=$(sqlite3 data/sessions.db "SELECT (SELECT COUNT(*) FROM Message m JOIN Conversation c ON m.conversationId=c.id WHERE c.id='$CONV_ID'), (SELECT agentSessionFile FROM Conversation WHERE id='$CONV_ID') != '' ;")
+row=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT (SELECT COUNT(*) FROM Message m JOIN Conversation c ON m.conversationId=c.id WHERE c.id='$CONV_ID'), (SELECT agentSessionFile FROM Conversation WHERE id='$CONV_ID') != '' ;")
 echo "$row"
 [ "$row" = "4|1" ] || fail "sessions 持久化不完整（期望 4 条消息+档案路径，实际 $row）"
-[ -d data/workspaces/AI000001 ] || fail "缺少员工 workspace 目录 data/workspaces/AI000001"
+[ -d "$DATA_DIR/workspaces/AI000001" ] || fail "缺少员工 workspace 目录 $DATA_DIR/workspaces/AI000001"
 
 step "3/6 审计：agent.run >= 2 且含模型与耗时"
 cli audit -n 10 | grep -E 'agent\.run .*AI000001/' || fail "缺少 agent.run 审计"
