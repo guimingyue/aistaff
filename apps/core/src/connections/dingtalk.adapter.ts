@@ -21,6 +21,9 @@ export function isolatedEnv(
     XDG_STATE_HOME: join(profileDir, '.local', 'state'),
     XDG_CACHE_HOME: join(profileDir, '.cache'),
     DWS_CONFIG_DIR: join(profileDir, '.dws'),
+    // macOS 钥匙串在隔离 HOME 下取 DEK 会超时（实测 device flow Step 4 失败），
+    // 托管 CLI 也无法应答 GUI 弹窗；token 落隔离 profile 目录（已 gitignore）
+    DWS_DISABLE_KEYCHAIN: '1',
     LANG: process.env.LANG ?? 'en_US.UTF-8',
   };
 }
