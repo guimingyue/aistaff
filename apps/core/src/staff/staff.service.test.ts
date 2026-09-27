@@ -107,7 +107,7 @@ describe('发号器与不变式（真实 SQLite）', () => {
     );
     assert.equal(
       missing.rejected.find((r) => r.configKey === 'bad1')?.reason,
-      'guardian nobody 未在员工声明中找到',
+      'guardian nobody not found in employee declarations',
     );
     assert.equal(await prisma.employee.count({ where: { configKey: 'bad1' } }), 0);
 
@@ -121,7 +121,7 @@ describe('发号器与不变式（真实 SQLite）', () => {
     );
     assert.match(
       inactive.rejected.find((r) => r.configKey === 'bad2')!.reason,
-      /非在职/,
+      /is not ACTIVE/,
     );
     assert.equal(await prisma.employee.count({ where: { configKey: 'bad2' } }), 0);
     await prisma.employee.update({
@@ -134,7 +134,7 @@ describe('发号器与不变式（真实 SQLite）', () => {
     );
     assert.match(
       wrongType.rejected.find((r) => r.configKey === 'bad3')!.reason,
-      /不是真人/,
+      /not a human employee/,
     );
     assert.equal(await prisma.employee.count({ where: { configKey: 'bad3' } }), 0);
   });
@@ -142,7 +142,7 @@ describe('发号器与不变式（真实 SQLite）', () => {
   it('真人 guardian 仍有在职数字员工时拒绝离职；移除声明同样被阻止', async () => {
     await assert.rejects(
       () => staff.changeStatus('000001', 'OFFBOARDED'),
-      /仍是 \d+ 个数字员工的 guardian/,
+      /still the guardian of \d+ digital employee/,
     );
 
     // g1 从声明集中消失 → orphan，但因 guardian 保护不被删除
@@ -156,12 +156,12 @@ describe('发号器与不变式（真实 SQLite）', () => {
   });
 
   it('状态机：未知状态/终态迁出/不存在 均抛错，ACTIVE⇄SUSPENDED 可用', async () => {
-    await assert.rejects(() => staff.changeStatus('000002', 'RETIRED'), /未知状态/);
-    await assert.rejects(() => staff.changeStatus('999999', 'ACTIVE'), /不存在/);
+    await assert.rejects(() => staff.changeStatus('000002', 'RETIRED'), /unknown status/);
+    await assert.rejects(() => staff.changeStatus('999999', 'ACTIVE'), /does not exist/);
     // AI000002 已在前面用例离职，OFFBOARDED 为终态
     await assert.rejects(
       () => staff.changeStatus('AI000002', 'ACTIVE'),
-      /不允许的状态迁移 OFFBOARDED/,
+      /disallowed status transition OFFBOARDED/,
     );
     await staff.changeStatus('000002', 'SUSPENDED');
     await staff.changeStatus('000002', 'ACTIVE');

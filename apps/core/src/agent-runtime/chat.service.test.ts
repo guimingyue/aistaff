@@ -23,6 +23,8 @@ class FakeRunner implements AgentRunner {
       this.failNext = undefined;
       throw err;
     }
+    req.onEvent?.({ type: 'tool_call', toolName: 'search', argsPreview: '{"q":"x"}' });
+    req.onEvent?.({ type: 'tool_result', toolName: 'search', isError: false, resultPreview: 'ok' });
     return {
       replyText: `回：${req.message}`,
       sessionFile: req.sessionFile ?? join(req.workspaceDir, `session-${this.requests.length}.jsonl`),
@@ -112,6 +114,10 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
     const r = await chat.chat('AI000001', '你好', { actor: 'tester' });
     assert.equal(r.employeeNo, 'AI000001');
     assert.equal(r.replyText, '回：你好');
+    assert.deepEqual(
+      r.steps.map((s) => s.type),
+      ['tool_call', 'tool_result'],
+    );
 
     const req = runner.requests.at(-1)!;
     assert.equal(req.systemPrompt, '人格X：简洁协作');
@@ -158,7 +164,7 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
   });
 
   it('真人无 AgentProfile：拒绝且无任何会话落库，留 reject 审计', async () => {
-    await assert.rejects(() => chat.chat('000001', '自言自语', { actor: 'tester' }), /未配置 AgentProfile/);
+    await assert.rejects(() => chat.chat('000001', '自言自语', { actor: 'tester' }), /no AgentProfile configured/);
     const g1 = await staffPrisma.employee.findUniqueOrThrow({ where: { employeeNo: '000001' } });
     assert.equal(await sessionsPrisma.conversation.count({ where: { employeeId: g1.id } }), 0);
     assert.ok(audits.some((a) => a.action === 'agent.run.reject' && a.target === '000001/-'));
@@ -173,7 +179,7 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
   it('AgentProfile 禁用拒绝对话', async () => {
     const emp = await staffPrisma.employee.findUnique({ where: { employeeNo: 'AI000002' } });
     await staffPrisma.agentProfile.update({ where: { employeeId: emp!.id }, data: { status: 'DISABLED' } });
-    await assert.rejects(() => chat.chat('AI000002', '在吗', { actor: 'tester' }), /已禁用/);
+    await assert.rejects(() => chat.chat('AI000002', '在吗', { actor: 'tester' }), /AgentProfile is disabled/);
     await staffPrisma.agentProfile.update({ where: { employeeId: emp!.id }, data: { status: 'ENABLED' } });
   });
 
@@ -182,7 +188,7 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
     const other = await chat.chat('AI000003', '新话题', { actor: 'tester' });
     await assert.rejects(
       () => chat.chat('AI000002', '串台', { actor: 'tester', conversationId: conv.id }),
-      /不存在或不属于/,
+      /does not exist or does not belong/,
     );
     assert.notEqual(conv.id, other.conversationId);
   });

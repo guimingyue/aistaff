@@ -168,7 +168,7 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
 
   it('前置校验：未登录拒绝启动且不留运行态', async () => {
     authed = false;
-    await assert.rejects(() => loops.start('AI000001', 'tester'), /未登录/);
+    await assert.rejects(() => loops.start('AI000001', 'tester'), /not logged in/);
     assert.deepEqual(loops.status(), []);
     authed = true;
   });
@@ -179,7 +179,7 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
       where: { employeeId_provider: { employeeId: a1.id, provider: 'DINGTALK' } },
       data: { bindingStatus: 'PENDING' },
     });
-    await assert.rejects(() => loops.start('AI000001', 'tester'), /未 BOUND/);
+    await assert.rejects(() => loops.start('AI000001', 'tester'), /not BOUND/);
     await staffPrisma.externalBinding.update({
       where: { employeeId_provider: { employeeId: a1.id, provider: 'DINGTALK' } },
       data: { bindingStatus: 'BOUND' },
@@ -267,10 +267,10 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
     assert.equal(channel.stopped, 1);
     assert.deepEqual(loops.status(), []);
     assert.ok(audits.some((a) => a.action === 'loop.stop' && a.target === 'AI000001'));
-    await assert.rejects(() => loops.stop('AI000001', 'tester'), /未在运行/);
+    await assert.rejects(() => loops.stop('AI000001', 'tester'), /is not running/);
 
     await loops.start('AI000001', 'tester');
-    await assert.rejects(() => loops.start('AI000001', 'tester'), /已在运行/);
+    await assert.rejects(() => loops.start('AI000001', 'tester'), /already running/);
     await loops.stop('AI000001', 'tester');
   });
 });

@@ -3,12 +3,14 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { AGENT_RUNNER, AgentRunner, RunTurnRequest } from './agent-runner';
+import { AGENT_RUNNER, AgentRunner, AgentStepEvent, RunTurnRequest } from './agent-runner';
 
 export interface ChatResult {
   employeeNo: string;
   conversationId: string;
   replyText: string;
+  /** 本轮 Agent 处理过程（工具调用/结果；AISTAFF_SHOW_THINKING=1 时含 thinking） */
+  steps: AgentStepEvent[];
   modelUsed?: string;
   durationMs: number;
 }
@@ -75,14 +77,14 @@ export class ChatService {
       where: { employeeNo },
       include: { agentProfile: true },
     });
-    if (!employee) throw new Error(`员工 ${employeeNo} 不存在`);
+    if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
     if (employee.status !== 'ACTIVE') {
-      throw new Error(`员工 ${employeeNo} 状态为 ${employee.status}，仅 ACTIVE 员工可对话`);
+      throw new Error(`employee ${employeeNo} is ${employee.status}; only ACTIVE employees can chat`);
     }
     const profile = employee.agentProfile;
-    if (!profile) throw new Error(`员工 ${employeeNo} 未配置 AgentProfile，无法对话`);
-    if (profile.status === 'DISABLED') throw new Error(`员工 ${employeeNo} 的 AgentProfile 已禁用`);
-    if (!message.trim()) throw new Error('消息内容为空');
+    if (!profile) throw new Error(`employee ${employeeNo} has no AgentProfile configured`);
+    if (profile.status === 'DISABLED') throw new Error(`employee ${employeeNo}: AgentProfile is disabled`);
+    if (!message.trim()) throw new Error('message is empty');
 
     let conversation;
     if (opts.conversationId) {
@@ -90,7 +92,7 @@ export class ChatService {
         where: { id: opts.conversationId },
       });
       if (!conversation || conversation.employeeId !== employee.id) {
-        throw new Error(`会话 ${opts.conversationId} 不存在或不属于员工 ${employeeNo}`);
+        throw new Error(`conversation ${opts.conversationId} does not exist or does not belong to employee ${employeeNo}`);
       }
     } else {
       const channel = opts.channel ?? 'CONSOLE';
@@ -112,6 +114,7 @@ export class ChatService {
     ctx.conversationId = conversation.id;
 
     const tools = profile.tools ? (JSON.parse(profile.tools) as string[]) : undefined;
+    const steps: AgentStepEvent[] = [];
     const turnReq: RunTurnRequest = {
       employeeNo,
       name: employee.name,
@@ -123,6 +126,7 @@ export class ChatService {
       message,
       workspaceDir: this.workspaceDir(employeeNo),
       sessionFile: conversation.agentSessionFile ?? undefined,
+      onEvent: (ev) => steps.push(ev),
     };
     mkdirSync(turnReq.workspaceDir, { recursive: true });
 
@@ -153,6 +157,7 @@ export class ChatService {
         durationMs,
         userChars: message.length,
         replyChars: result.replyText.length,
+        steps: steps.length,
         sessionFile: result.sessionFile,
       },
     });
@@ -160,6 +165,7 @@ export class ChatService {
       employeeNo,
       conversationId: conversation.id,
       replyText: result.replyText,
+      steps,
       modelUsed: result.modelUsed,
       durationMs,
     };
@@ -170,7 +176,7 @@ export class ChatService {
       where: { employeeNo },
       include: { agentProfile: true },
     });
-    if (!employee) throw new Error(`员工 ${employeeNo} 不存在`);
+    if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
     const conversations = await this.prisma.sessions.conversation.findMany({
       where: { employeeId: employee.id },
       orderBy: { createdAt: 'desc' },

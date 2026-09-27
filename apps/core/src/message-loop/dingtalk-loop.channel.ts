@@ -47,11 +47,11 @@ class DwsAtChannel implements LoopChannel {
       try {
         payload = JSON.parse(trimmed) as AtEventPayload;
       } catch {
-        handlers.onDiagnostic(`非 JSON 输出行: ${trimmed.slice(0, 200)}`);
+        handlers.onDiagnostic(`non-JSON output line: ${trimmed.slice(0, 200)}`);
         return;
       }
       if (payload?.type !== 'user_im_message_receive_at' || !payload.event_id || !payload.conversation_id) {
-        handlers.onDiagnostic(`忽略非 @消息事件行: ${trimmed.slice(0, 200)}`);
+        handlers.onDiagnostic(`ignored non-@message event line: ${trimmed.slice(0, 200)}`);
         return;
       }
       handlers.onMessage({
@@ -67,7 +67,7 @@ class DwsAtChannel implements LoopChannel {
       if (line.trim()) handlers.onDiagnostic(line.trim().slice(0, 400));
     });
     child.on('error', (err) => {
-      handlers.onDiagnostic(`子进程错误: ${err.message}`);
+      handlers.onDiagnostic(`child process error: ${err.message}`);
       this.child = undefined;
       handlers.onExit(-1);
     });
@@ -87,7 +87,7 @@ class DwsAtChannel implements LoopChannel {
     );
     const parsed = parseJsonLoose(res.stdout) as { success?: boolean } | null;
     if (res.code !== 0 || parsed?.success === false) {
-      throw new Error(`钉钉回发失败 (exit=${res.code}): ${(res.stderr || res.stdout).slice(0, 300)}`);
+      throw new Error(`dingtalk send failed (exit=${res.code}): ${(res.stderr || res.stdout).slice(0, 300)}`);
     }
   }
 

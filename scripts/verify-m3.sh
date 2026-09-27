@@ -50,7 +50,7 @@ step "3/5 未登录 bind -> 拒绝 + 审计"
 if cli bind AI000001 --provider DINGTALK --external-user-id 'x" && echo pwned' 2>/tmp/m3-bind.err; then
   fail "未登录 bind 竟然成功"
 fi
-if ! grep -q "未登录" /tmp/m3-bind.err; then
+if ! grep -q "not logged in" /tmp/m3-bind.err; then
   cat /tmp/m3-bind.err
   fail "拒绝原因异常"
 fi

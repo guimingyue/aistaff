@@ -4,6 +4,13 @@ import { AgentRunner, RunTurnRequest, RunTurnResult } from './agent-runner';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 
+function preview(value: unknown, max: number): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!text) return undefined;
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 let sdkPromise: Promise<PiSdk> | undefined;
 function loadSdk(): Promise<PiSdk> {
   if (!sdkPromise) {
@@ -56,7 +63,7 @@ export class PiAgentRunner implements AgentRunner {
     if (req.model) {
       const resolved = pi.resolveCliModel({ cliModel: req.model, modelRuntime: runtime });
       if (resolved.error || !resolved.model) {
-        throw new Error(`模型解析失败（${req.model}）：${resolved.error ?? '无匹配模型'}`);
+        throw new Error(`failed to resolve model "${req.model}": ${resolved.error ?? 'no matching model'}`);
       }
       model = resolved.model;
       modelUsed = `${resolved.model.provider}/${resolved.model.id}`;
@@ -88,7 +95,10 @@ export class PiAgentRunner implements AgentRunner {
       resourceLoader: loader,
       sessionManager,
     };
-    if (model) Object.assign(options, { model, thinkingLevel: 'off' });
+    // thinking 由开关在源头决定：关闭时 pi 不产生任何思考内容，事件流中也不会出现 thinking
+    const showThinking = process.env.AISTAFF_SHOW_THINKING === '1';
+    if (model) Object.assign(options, { model });
+    Object.assign(options, { thinkingLevel: showThinking ? 'medium' : 'off' });
     if (req.tools) {
       if (req.tools.length === 0) {
         Object.assign(options, { noTools: 'all' as const });
@@ -98,18 +108,39 @@ export class PiAgentRunner implements AgentRunner {
     }
 
     const { session } = await pi.createAgentSession(options);
+    const emit = req.onEvent;
+    const unsubscribe = emit
+      ? session.subscribe((ev) => {
+          if (ev.type === 'tool_execution_start') {
+            emit({ type: 'tool_call', toolName: ev.toolName, argsPreview: preview(ev.args, 200) });
+          } else if (ev.type === 'tool_execution_end') {
+            emit({
+              type: 'tool_result',
+              toolName: ev.toolName,
+              isError: Boolean(ev.isError),
+              resultPreview: preview(ev.result, 400),
+            });
+          } else if (ev.type === 'message_update') {
+            const aev = ev.assistantMessageEvent as { type: string; content?: string };
+            if (aev.type === 'thinking_end' && aev.content?.trim()) {
+              emit({ type: 'thinking', text: aev.content });
+            }
+          }
+        })
+      : undefined;
     try {
       await session.prompt(req.message);
       const replyText = session.getLastAssistantText() ?? '';
       if (!replyText.trim()) {
-        throw new Error(`员工 ${req.employeeNo} 的 Agent 本轮没有产出文本回复`);
+        throw new Error(`employee ${req.employeeNo}: agent turn produced no text reply`);
       }
       const finalSessionFile = sessionManager.getSessionFile() ?? req.sessionFile;
       if (!finalSessionFile) {
-        throw new Error(`员工 ${req.employeeNo} 的 pi 会话未落盘（无会话档案路径）`);
+        throw new Error(`employee ${req.employeeNo}: pi session file was not persisted (no session path)`);
       }
       return { replyText, sessionFile: finalSessionFile, modelUsed };
     } finally {
+      unsubscribe?.();
       session.dispose();
     }
   }

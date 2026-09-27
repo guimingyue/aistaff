@@ -66,7 +66,7 @@ step "4/6 拒绝路径：真人无 AgentProfile -> 400 + reject 审计"
 if cli chat 000001 "自言自语" 2>/tmp/m4-neg.err; then
   fail "真人对话竟然成功"
 fi
-grep -q "未配置 AgentProfile" /tmp/m4-neg.err || { cat /tmp/m4-neg.err; fail "拒绝原因异常"; }
+grep -q "no AgentProfile configured" /tmp/m4-neg.err || { cat /tmp/m4-neg.err; fail "拒绝原因异常"; }
 cnt=$(sqlite3 data/audit.db "SELECT COUNT(*) FROM AuditEvent WHERE action='agent.run.reject' AND target LIKE '000001/%';")
 [ "$cnt" -ge 1 ] || fail "缺少 reject 审计"
 

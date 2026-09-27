@@ -13,7 +13,14 @@ export interface RunTurnRequest {
   workspaceDir: string;
   /** 既有 pi 会话档案路径；undefined 表示新会话 */
   sessionFile?: string;
+  /** 本轮处理过程事件回调（工具调用/结果；thinking 仅 AISTAFF_SHOW_THINKING=1 时产生） */
+  onEvent?: (event: AgentStepEvent) => void;
 }
+
+export type AgentStepEvent =
+  | { type: 'tool_call'; toolName: string; argsPreview?: string }
+  | { type: 'tool_result'; toolName: string; isError: boolean; resultPreview?: string }
+  | { type: 'thinking'; text: string };
 
 export interface RunTurnResult {
   replyText: string;

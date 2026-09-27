@@ -51,7 +51,7 @@ export class ConnectionsService {
       if (f) return f(this.profileDir(employeeNo, provider));
       return new FeishuAdapter();
     }
-    throw new Error(`未知 provider ${provider}`);
+    throw new Error(`unknown provider ${provider}`);
   }
 
   private async requireEmployee(employeeNo: string) {
@@ -59,7 +59,7 @@ export class ConnectionsService {
       where: { employeeNo },
       include: { bindings: true },
     });
-    if (!employee) throw new Error(`员工 ${employeeNo} 不存在`);
+    if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
     return employee;
   }
 
@@ -67,7 +67,7 @@ export class ConnectionsService {
   async login(employeeNo: string, provider: string, actor: string, orgProfile?: string) {
     const employee = await this.requireEmployee(employeeNo);
     if (employee.status === 'OFFBOARDED') {
-      throw new Error(`员工 ${employeeNo} 已离职，禁止登录`);
+      throw new Error(`employee ${employeeNo} is offboarded; login is not allowed`);
     }
     const adapter = this.adapter(provider, employeeNo);
     const exitCode = await adapter.loginInteractive(orgProfile);
@@ -88,15 +88,15 @@ export class ConnectionsService {
     const { employeeNo, provider, externalUserId } = req;
     const employee = await this.requireEmployee(employeeNo);
     if (employee.status === 'OFFBOARDED') {
-      throw new Error(`员工 ${employeeNo} 已离职，禁止绑定`);
+      throw new Error(`employee ${employeeNo} is offboarded; binding is not allowed`);
     }
     const adapter = this.adapter(provider, employeeNo);
 
     const status = await adapter.authStatus();
     if (!status.authenticated) {
-      await this.auditReject(employeeNo, provider, externalUserId, actor, 'profile 未登录');
+      await this.auditReject(employeeNo, provider, externalUserId, actor, 'CLI profile not logged in');
       throw new Error(
-        `员工 ${employeeNo} 的 ${provider} CLI profile 未登录，先执行 aistaff login ${employeeNo} --provider ${provider}`,
+        `employee ${employeeNo}: ${provider} CLI profile is not logged in; run "aistaff login ${employeeNo} --provider ${provider}" first`,
       );
     }
 
@@ -111,8 +111,8 @@ export class ConnectionsService {
         create: { employeeId: employee.id, provider, externalUserId, bindingStatus: 'PENDING' },
         update: { externalUserId, bindingStatus: 'PENDING' },
       });
-      await this.auditReject(employeeNo, provider, externalUserId, actor, '三方通讯录中不存在该账号');
-      throw new Error(`校验失败：${provider} 通讯录中不存在账号 ${externalUserId}`);
+      await this.auditReject(employeeNo, provider, externalUserId, actor, 'account not found in third-party directory');
+      throw new Error(`verification failed: account ${externalUserId} not found in ${provider} directory`);
     }
 
     if (user.name !== employee.name) {
@@ -126,10 +126,10 @@ export class ConnectionsService {
         provider,
         externalUserId,
         actor,
-        `姓名不匹配（声明「${employee.name}」≠ 三方「${user.name}」）`,
+        `name mismatch (declared "${employee.name}" != third-party "${user.name}")`,
       );
       throw new Error(
-        `校验失败：员工声明姓名「${employee.name}」与三方账号姓名「${user.name}」不一致`,
+        `verification failed: declared name "${employee.name}" does not match third-party name "${user.name}"`,
       );
     }
 

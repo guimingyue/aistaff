@@ -118,12 +118,22 @@ program
     const result = await corePost<{
       conversationId: string;
       replyText: string;
+      steps?: Array<{ type: string; toolName?: string; isError?: boolean; argsPreview?: string; resultPreview?: string; text?: string }>;
       modelUsed?: string;
       durationMs: number;
     }>(`/employees/${encodeURIComponent(employeeNo)}/chat`, {
       message: words.join(' '),
       conversationId: opts.conversation,
     });
+    for (const s of result.steps ?? []) {
+      if (s.type === 'tool_call') {
+        console.log(`[tool] ${s.toolName}${s.argsPreview ? ` <- ${s.argsPreview}` : ''}`);
+      } else if (s.type === 'tool_result') {
+        console.log(`[tool] ${s.toolName} ${s.isError ? 'FAILED' : 'ok'}${s.resultPreview ? ` -> ${s.resultPreview}` : ''}`);
+      } else if (s.type === 'thinking') {
+        console.log(`[thinking] ${s.text}`);
+      }
+    }
     console.log(`[${result.conversationId}${result.modelUsed ? ` ${result.modelUsed}` : ''}] ${result.replyText}`);
   });
 

@@ -29,10 +29,10 @@ export class ConnectionsController {
     @Body() body: { provider?: string; externalUserId?: string },
   ) {
     if (!body?.provider || !body?.externalUserId) {
-      throw new BadRequestException('缺少 provider 或 externalUserId');
+      throw new BadRequestException('missing provider or externalUserId');
     }
     if (!['DINGTALK', 'FEISHU'].includes(body.provider)) {
-      throw new BadRequestException(`未知 provider ${body.provider}`);
+      throw new BadRequestException(`unknown provider ${body.provider}`);
     }
     try {
       return await this.connections.bind(

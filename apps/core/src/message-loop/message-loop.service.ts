@@ -34,23 +34,23 @@ export class MessageLoopService {
   }
 
   async start(employeeNo: string, actor: string) {
-    if (this.loops.has(employeeNo)) throw new Error(`员工 ${employeeNo} 的消息闭环已在运行`);
+    if (this.loops.has(employeeNo)) throw new Error(`message loop for employee ${employeeNo} is already running`);
     const employee = await this.prisma.staff.employee.findUnique({
       where: { employeeNo },
       include: { bindings: true, agentProfile: true },
     });
-    if (!employee) throw new Error(`员工 ${employeeNo} 不存在`);
-    if (employee.status !== 'ACTIVE') throw new Error(`员工 ${employeeNo} 状态为 ${employee.status}，仅 ACTIVE 可上线`);
-    if (employee.agentProfile?.status !== 'ENABLED') throw new Error(`员工 ${employeeNo} 无启用的 AgentProfile`);
+    if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
+    if (employee.status !== 'ACTIVE') throw new Error(`employee ${employeeNo} is ${employee.status}; only ACTIVE can start a loop`);
+    if (employee.agentProfile?.status !== 'ENABLED') throw new Error(`employee ${employeeNo} has no enabled AgentProfile`);
     const binding = employee.bindings.find((b) => b.provider === 'DINGTALK');
     if (binding?.bindingStatus !== 'BOUND') {
-      throw new Error(`员工 ${employeeNo} 的 DINGTALK 绑定未 BOUND，先完成绑定校验`);
+      throw new Error(`employee ${employeeNo}: DINGTALK binding is not BOUND; complete binding verification first`);
     }
     const provider = this.providers.DINGTALK;
-    if (!provider) throw new Error('DINGTALK 闭环通道未配置');
+    if (!provider) throw new Error('DINGTALK loop channel is not configured');
     const dir = this.profileDir(employeeNo);
     if (!(await provider.authStatus(dir))) {
-      throw new Error(`员工 ${employeeNo} 的钉钉 CLI profile 未登录，先执行 aistaff login ${employeeNo}`);
+      throw new Error(`employee ${employeeNo}: DingTalk CLI profile is not logged in; run "aistaff login ${employeeNo}" first`);
     }
 
     const loop: RunningLoop = {
@@ -150,7 +150,7 @@ export class MessageLoopService {
 
   async stop(employeeNo: string, actor: string) {
     const loop = this.loops.get(employeeNo);
-    if (!loop) throw new Error(`员工 ${employeeNo} 的消息闭环未在运行`);
+    if (!loop) throw new Error(`message loop for employee ${employeeNo} is not running`);
     this.loops.delete(employeeNo);
     await loop.channel.stop();
     await this.audit.record({

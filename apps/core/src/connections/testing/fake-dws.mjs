@@ -15,7 +15,7 @@ const flag = (name) => {
 
 const cfg = process.env.DWS_CONFIG_DIR;
 const statePath = (name) => {
-  if (!cfg) throw new Error('fake-dws: 状态文件模式需要 DWS_CONFIG_DIR');
+  if (!cfg) throw new Error('fake-dws: state-file mode requires DWS_CONFIG_DIR');
   mkdirSync(cfg, { recursive: true });
   return join(cfg, name);
 };
@@ -40,7 +40,7 @@ const out = (obj) => {
 if (sub === 'auth' && rest[0] === 'status') {
   const authed =
     process.env.FAKE_AUTH !== undefined ? process.env.FAKE_AUTH === '1' : cfg !== undefined && existsSync(statePath('fake-auth'));
-  out({ success: true, authenticated: authed, message: authed ? undefined : '未登录' });
+  out({ success: true, authenticated: authed, message: authed ? undefined : 'not logged in' });
 }
 if (sub === 'auth' && rest[0] === 'login') {
   if (process.env.FAKE_AUTH === undefined && cfg) writeFileSync(statePath('fake-auth'), new Date().toISOString());
@@ -64,7 +64,7 @@ if (sub === 'chat' && rest[0] === 'message' && rest[1] === 'send') {
   const to = flag('group') ?? flag('user') ?? flag('open-dingtalk-id');
   const text = flag('text') ?? rest[rest.length - 1];
   if (process.env.FAKE_SEND_FAIL === '1') {
-    console.error('fake-dws: 发送失败（注入）');
+    console.error('fake-dws: send failed (injected)');
     process.exit(1);
   }
   if (process.env.FAKE_SEND_OUT) {
@@ -88,6 +88,6 @@ if (sub === 'event' && rest[0] === 'consume') {
   process.stdin.on('close', bye);
   setInterval(() => undefined, 60_000);
 } else {
-  console.error(`fake-dws: 未识别的调用 ${process.argv.slice(2).join(' ')}`);
+  console.error(`fake-dws: unrecognized invocation ${process.argv.slice(2).join(' ')}`);
   process.exit(2);
 }

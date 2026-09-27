@@ -53,31 +53,31 @@ export class StaffService {
         const existing = await tx.employee.findUnique({ where: { configKey } });
 
         if (existing && cfg.type !== existing.type) {
-          rejected.push({ configKey, reason: `不允许变更员工类型 ${existing.type} → ${cfg.type}（工号绑定类型）` });
+          rejected.push({ configKey, reason: `cannot change employee type ${existing.type} -> ${cfg.type} (type is bound to the issued employeeNo)` });
           continue;
         }
 
         let guardianEmployeeNo: string | null = null;
         if (cfg.type === 'DIGITAL') {
           if (!cfg.guardian) {
-            rejected.push({ configKey, reason: '数字员工必须声明 guardian' });
+            rejected.push({ configKey, reason: 'a digital employee must declare a guardian' });
             continue;
           }
           const guardian = await tx.employee.findUnique({ where: { configKey: cfg.guardian } });
           if (!guardian) {
-            rejected.push({ configKey, reason: `guardian ${cfg.guardian} 未在员工声明中找到` });
+            rejected.push({ configKey, reason: `guardian ${cfg.guardian} not found in employee declarations` });
             continue;
           }
           if (guardian.type !== 'HUMAN') {
-            rejected.push({ configKey, reason: `guardian ${cfg.guardian} 不是真人员工` });
+            rejected.push({ configKey, reason: `guardian ${cfg.guardian} is not a human employee` });
             continue;
           }
           if (guardian.status !== 'ACTIVE') {
-            rejected.push({ configKey, reason: `guardian ${cfg.guardian} 非在职（${guardian.status}）` });
+            rejected.push({ configKey, reason: `guardian ${cfg.guardian} is not ACTIVE (${guardian.status})` });
             continue;
           }
           if (guardian.employeeNo === null) {
-            rejected.push({ configKey, reason: `guardian ${cfg.guardian} 尚未发号` });
+            rejected.push({ configKey, reason: `guardian ${cfg.guardian} has not been assigned an employee number yet` });
             continue;
           }
           guardianEmployeeNo = guardian.employeeNo;
@@ -164,7 +164,7 @@ export class StaffService {
           if (wards > 0) {
             rejected.push({
               configKey: orphan.configKey,
-              reason: `仍为 ${wards} 个数字员工的 guardian，禁止移除（先转移 guardian）`,
+              reason: `still the guardian of ${wards} digital employee(s); removal forbidden until guardians are reassigned`,
             });
             continue;
           }
@@ -184,20 +184,20 @@ export class StaffService {
    */
   async changeStatus(employeeNo: string, to: string): Promise<{ employeeNo: string; status: string }> {
     if (!(to in TRANSITIONS)) {
-      throw new Error(`未知状态 ${to}`);
+      throw new Error(`unknown status ${to}`);
     }
     return this.prisma.staff.$transaction(async (tx) => {
       const employee = await tx.employee.findUnique({ where: { employeeNo } });
-      if (!employee) throw new Error(`员工 ${employeeNo} 不存在`);
+      if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
       if (!TRANSITIONS[employee.status]?.includes(to)) {
-        throw new Error(`不允许的状态迁移 ${employee.status} → ${to}`);
+        throw new Error(`disallowed status transition ${employee.status} -> ${to}`);
       }
       if (to === 'OFFBOARDED' && employee.type === 'HUMAN') {
         const wards = await tx.employee.count({
           where: { guardianEmployeeNo: employeeNo, status: { not: 'OFFBOARDED' } },
         });
         if (wards > 0) {
-          throw new Error(`${employeeNo} 仍是 ${wards} 个数字员工的 guardian，先转移 guardian 再离职`);
+          throw new Error(`${employeeNo} is still the guardian of ${wards} digital employee(s); reassign guardians before offboarding`);
         }
       }
       const updated = await tx.employee.update({ where: { id: employee.id }, data: { status: to } });

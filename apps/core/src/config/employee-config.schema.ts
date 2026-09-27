@@ -28,7 +28,7 @@ export const employeeConfigSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['guardian'],
-        message: '数字员工必须声明 guardian（一期强制 1 个在职真人）',
+        message: 'a digital employee must declare a guardian (phase 1 requires one active human)',
       });
     }
   });

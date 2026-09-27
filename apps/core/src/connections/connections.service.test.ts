@@ -87,7 +87,7 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     fakeState.argvOut = join(dir, 'argv.log');
     await assert.rejects(
       () => connections.bind({ employeeNo: '000001', provider: 'DINGTALK', externalUserId: 'u1' }, 'tester'),
-      /未登录/,
+      /not logged in/,
     );
     assert.ok(audits.some((a) => a.action === 'connection.bind.reject' && a.target === '000001/DINGTALK'));
     assert.equal(await binding(), null);
@@ -98,7 +98,7 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     fakeState.users = {};
     await assert.rejects(
       () => connections.bind({ employeeNo: '000001', provider: 'DINGTALK', externalUserId: 'ghost' }, 'tester'),
-      /不存在/,
+      /not found in/,
     );
     const b = await binding();
     assert.equal(b!.bindingStatus, 'PENDING');
@@ -109,9 +109,9 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     fakeState.users = { ghost2: '别人' };
     await assert.rejects(
       () => connections.bind({ employeeNo: '000001', provider: 'DINGTALK', externalUserId: 'ghost2' }, 'tester'),
-      /「真人」与三方账号姓名「别人」/,
+      /declared name "真人" does not match third-party name "别人"/,
     );
-    assert.ok(audits.some((a) => /姓名不匹配/.test(JSON.stringify(a.detail))));
+    assert.ok(audits.some((a) => /name mismatch/.test(JSON.stringify(a.detail))));
   });
 
   it('姓名匹配：BOUND 且写入 cliProfileDir 与审计', async () => {
@@ -141,7 +141,7 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     const evil = String.raw`x" && touch ${join(dir, 'pwned')} #`;
     await assert.rejects(
       () => connections.bind({ employeeNo: '000001', provider: 'DINGTALK', externalUserId: evil }, 'tester'),
-      /不存在/,
+      /not found in/,
     );
     const argvs = lastArgvLines();
     const contactCall = argvs.find((a) => a[0] === 'contact');
@@ -186,7 +186,7 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
   it('飞书通道：显式失败不静默', async () => {
     await assert.rejects(
       () => connections.bind({ employeeNo: '000001', provider: 'FEISHU', externalUserId: 'x' }, 'tester'),
-      /二期/,
+      /phase 2/,
     );
   });
 });

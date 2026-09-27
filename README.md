@@ -27,11 +27,11 @@ cd apps/cli && pnpm exec tsx src/main.ts <command>
 |---|---|
 | `health` / `employees list` / `employee <start\|stop\|offboard> <工号>` | 身份与状态机（工号唯一/不变/离职不复用） |
 | `login <工号> [--profile <corpId>]` / `bind <工号> --provider DINGTALK --external-user-id <id>` / `connection <工号>` | CLI 登录托管（每员工隔离 profile `data/cli-profiles/<工号>-DINGTALK`；`--profile` 定向授权组织，绕开手机默认组织限制）+ 只读校验绑定 |
-| `chat <工号> <消息...> [-c 会话id]` / `conversations <工号>` | pi-coding-agent 员工实例对话，会话持久化 sessions.db |
+| `chat <工号> <消息...> [-c 会话id]` / `conversations <工号>` | pi-coding-agent 员工实例对话，会话持久化 sessions.db；响应含本轮处理过程 `steps`（工具调用/结果，`AISTAFF_SHOW_THINKING=1` 时含 thinking），CLI 先展示处理过程再输出回复 |
 | `listen <工号> [--stop]` / `loops` | 钉钉 @消息闭环：订阅→路由 Agent→自动回发（优雅停机 SIGTERM） |
 | `audit -n <条数>` | 追加写审计（状态/绑定/CLI/消息全链路） |
 
-关键环境变量（core 进程）：`AISTAFF_DATA_DIR`（默认 `data/`）、`AISTAFF_AGENT_RUNNER=echo`、`AISTAFF_MODEL_API_KEY`、`AISTAFF_MODEL_PROVIDER`、`AISTAFF_DWS_BIN`（替换 dws 可执行文件，测试假 CLI 用）。
+关键环境变量（core 进程）：`AISTAFF_DATA_DIR`（默认 `data/`）、`AISTAFF_AGENT_RUNNER=echo`、`AISTAFF_MODEL_API_KEY`、`AISTAFF_MODEL_PROVIDER`、`AISTAFF_SHOW_THINKING=1`（在 chat 处理过程中展示模型思考，默认关闭且模型侧不产生思考）、`AISTAFF_DWS_BIN`（替换 dws 可执行文件，测试假 CLI 用）。
 
 ## 验证
 

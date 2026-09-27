@@ -8,7 +8,7 @@ export class FeishuAdapter implements DirectoryAdapter {
   readonly provider = 'FEISHU' as const;
 
   private refuse(): never {
-    throw new Error('飞书通道二期实现（一期仅开放 DINGTALK，见 docs/design.md 通道策略）');
+    throw new Error('Feishu channel arrives in phase 2 (phase 1 supports DINGTALK only; see docs/design.md channel strategy)');
   }
 
   authStatus(): Promise<AuthStatus> {

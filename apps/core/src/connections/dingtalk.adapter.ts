@@ -82,7 +82,7 @@ export class DingtalkAdapter implements DirectoryAdapter {
     if (orgProfile) {
       // argv 值若以 - 开头会被 CLI 解析成旗标；corpId 形态白名单收口
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(orgProfile)) {
-        throw new Error(`组织 ID 格式非法：${orgProfile.slice(0, 20)}`);
+        throw new Error(`invalid organization ID format: ${orgProfile.slice(0, 20)}`);
       }
       args.push('--profile', orgProfile);
     }
