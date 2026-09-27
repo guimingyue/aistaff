@@ -1,6 +1,6 @@
 # 待办（一期 MVP 未闭环项）
 
-M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、32/32 单测）。以下环节因**外部条件不具备**尚未完成真实环境实测，均已在 README.md 如实记录，非代码缺口。
+M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、32/32 单测）。以下环节因**外部条件不具备**尚未完成真实环境实测，均已在本文档如实记录，非代码缺口。
 
 ## ✅ 2026-09-25 真实环境进展（Chating 组织）
 - 真实 login + bind **已闭环**：组织开放 CLI 数据访问后，`aistaff login AI000001 --profile <corpId>` 设备授权成功，`bind` 只读校验姓名「小助」→ **BOUND（M3-live 达成）**；`listen` 订阅真实建立（bus state=connected）；CLI 真实出站回发成功（消息落定 openMessageId，`query-send-status` 可查）。

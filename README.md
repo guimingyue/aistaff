@@ -1,52 +1,147 @@
-# aistaff 数字员工平台（一期 MVP）
+# aistaff 数字员工平台
 
-设计见 `docs/design.md`。monorepo：`apps/core`（NestJS 常驻服务 + SQLite 三库）、`apps/cli`（`aistaff` 管理命令行）、`config/`（员工 YAML 声明）、`scripts/`（各里程碑验证）。
+aistaff 让 AI 助手以**数字员工**的身份进入企业组织：拥有独立工号和员工账号，与真人员工同构地出现在通讯录与汇报线中，同事可以像对待真人同事一样使用它——在群里 @ 它提问、给它派任务、收到署名它的回复。
 
-## 前置条件
+数字员工对外使用真实的钉钉账号收发消息，对内由 AI 大脑（基于 [pi coding agent](https://github.com/earendil-works/pi)）生成回复。设计动机与完整方案见 [`docs/design.md`](docs/design.md)。
 
-- Node ≥ 22、pnpm 10（`allowBuilds` 需放行 prisma/esbuild 构建脚本，已配在 `pnpm-workspace.yaml`）
-- 钉钉侧真实链路需官方 CLI `dws` 在 PATH（验证于 v1.0.54；用到 `auth status/login --device`、`contact user get/get-self`、`chat message send`、`event consume user_im_message_receive_at --flatten`）
-- 真实模型回复需 `AISTAFF_MODEL_API_KEY`（配套 `AISTAFF_MODEL_PROVIDER`，缺省 anthropic）；不设置时可用 `AISTAFF_AGENT_RUNNER=echo` 桩走通除模型产出的全链路
-- 慢网装依赖：pnpm 已配 npmmirror 源；ETag 续传策略见 lockfile，无需额外操作
+## 平台特性
 
-## 启动
+- **做认证，不做授权**：平台只回答"你是谁"；能做什么由三方账号自身的权限决定，不建 RBAC、不双写权限数据。
+- **真人与数字员工同构**：同一份员工模型；数字员工只是额外挂了 guardian、Agent 配置和独立 workspace。
+- **工号权威且永不复用**：数字员工为 `AI` + 6 位序号（如 `AI000001`），真人为 6 位纯数字；一经发放不再变更，员工离职后工号永久保留。
+- **每个数字员工有且仅有一位在职真人 guardian**：创建人默认担任，绑定等操作可追责到人。
+- **零 OAuth 集成**：与钉钉的交互（登录、通讯录校验、@消息订阅、回发消息）全部经官方 CLI `dws` 完成，无需申请开放平台应用、回调域名或公网地址。
+- **凭证彼此隔离**：每个数字员工一份独立登录态目录，平台只管理目录生命周期，不接触令牌本体。
+- **声明式运维**：员工以 YAML 声明，服务启动即自动对齐到员工库；日常管理全部可经命令行完成。
+- **注入防线**：外部输入一律以参数数组传给命令行工具，绝不拼接 shell 字符串。
+- **全链路审计**：每次工具调用、消息收发、状态变更都追加写入审计库。
+- **轻量存储**：员工、会话、审计三个 SQLite 库配合进程内队列即可运行；经 Prisma 与应用层抽象可平滑迁移到 PostgreSQL、Redis 与专用密钥服务。
+
+## 工作原理
+
+```
+config/employees/*.yaml ──启动自动对齐──▶ 员工库（工号发放 / 状态 / 绑定）
+                                          │
+钉钉群 @小助 ─▶ dws 事件订阅 ─▶ 消息回路 ─▶ 匹配该员工的 Agent 配置
+                                          │                │
+                  dws 发送群消息 ◀─────────┴── pi coding agent（会话库记录上下文）
+                                          │
+                                     审计库（登录 / 绑定 / 消息 / 状态变更全链路留痕）
+```
+
+## 能力与验证状态
+
+| 能力 | 代码 | 真实环境验证 |
+|---|---|---|
+| 员工声明、工号发放、在职/离职与 guardian 校验 | ✅ | ✅ |
+| 钉钉设备流登录托管、只读校验绑定 | ✅ | ✅ |
+| Agent 对话（人格/模型/工具装配、会话续接） | ✅ | ⬜ 需配置模型 API Key |
+| 群内 @ 消息自动回复 | ✅ | ⬜ 需第二个钉钉账号在群内发起 @（同账号自己 @ 自己不会触发，可避免数字员工互相回环） |
+| 处理过程可观测（工具调用记录，思考内容可选展示） | ✅ | ⬜ 随真实模型对话一并验证 |
+| 全链路审计与命令行观测 | ✅ | ✅ |
+| 测试与验证脚本（单测 + 假钉钉 + 回显模式，无需外部依赖） | ✅ | ✅ |
+
+未闭环项的外部条件与复跑方式记录在 [`TODO.md`](TODO.md)。
+
+## 快速开始
+
+### 前置条件
+
+- Node ≥ 22、pnpm 10
+- 真实钉钉链路需钉钉官方 CLI `dws` 在 PATH
+- 真实模型对话需 `AISTAFF_MODEL_API_KEY`；没有模型凭证时可设 `AISTAFF_AGENT_RUNNER=echo`，用回显模式走完除模型输出外的全部流程
+
+### 启动
 
 ```bash
 pnpm install
-pnpm --filter @aistaff/core run db:push   # Prisma 三库（staff/sessions/audit，文件在 data/）
-(cd apps/core && pnpm start)              # core 监听 http://127.0.0.1:3000
+pnpm run db:push          # 生成员工 / 会话 / 审计三个库（文件位于 data/）
+pnpm run dev              # 启动服务，HTTP 接口监听 http://127.0.0.1:3000
 ```
 
-core 启动即 reconcile `config/*.yaml`（员工建档/发号/状态收敛），所有操作可经 CLI 观测：
+core 启动时会扫描 `config/employees/*.yaml`，自动把员工库对齐到声明内容（建档、发号、状态收敛）。随后在另一个终端查看：
 
 ```bash
-cd apps/cli && pnpm exec tsx src/main.ts <command>
+pnpm run cli employees list
 ```
+
+### 声明一个数字员工
+
+```yaml
+# config/employees/xiaozhu.yaml
+name: 小助
+type: DIGITAL
+dept: 公共服务部
+guardian: human01            # 负责该数字员工的真人（取其 YAML 文件名）
+bindings:
+  - provider: DINGTALK
+agentProfile:
+  model: anthropic/claude-sonnet-4-5
+  systemPrompt: 你是组织内的数字员工「小助」，回答简洁、以同事口吻协作。
+  tools: []                  # 显式空数组 = 禁用全部工具
+```
+
+### 上线对话闭环
+
+以下 `aistaff …` 均指 `pnpm run cli …`（如 `pnpm run cli login AI000001`）：
+
+```bash
+aistaff login AI000001                    # 打开钉钉登录流程，按提示在手机钉钉上确认授权
+aistaff bind AI000001 --provider DINGTALK --external-user-id <userId>   # 只读校验钉钉账号（存在 + 姓名一致）后完成绑定
+aistaff listen AI000001                   # 群内 @ 消息 → Agent → 自动回复
+aistaff chat AI000001 "你好"              # 在命令行直接对话，查看处理过程与回复
+```
+
+## 管理 CLI
 
 | 命令 | 作用 |
 |---|---|
-| `health` / `employees list` / `employee <start\|stop\|offboard> <工号>` | 身份与状态机（工号唯一/不变/离职不复用） |
-| `login <工号> [--profile <corpId>]` / `bind <工号> --provider DINGTALK --external-user-id <id>` / `connection <工号>` | CLI 登录托管（每员工隔离 profile `data/cli-profiles/<工号>-DINGTALK`；`--profile` 定向授权组织，绕开手机默认组织限制）+ 只读校验绑定 |
-| `chat <工号> <消息...> [-c 会话id]` / `conversations <工号>` | pi-coding-agent 员工实例对话，会话持久化 sessions.db；响应含本轮处理过程 `steps`（工具调用/结果，`AISTAFF_SHOW_THINKING=1` 时含 thinking），CLI 先展示处理过程再输出回复 |
-| `listen <工号> [--stop]` / `loops` | 钉钉 @消息闭环：订阅→路由 Agent→自动回发（优雅停机 SIGTERM） |
-| `audit -n <条数>` | 追加写审计（状态/绑定/CLI/消息全链路） |
+| `health` | 服务健康检查 |
+| `employees list` | 列出员工及状态 |
+| `employee start\|stop\|offboard <工号>` | 启用 / 停用 / 离职（离职为终态，工号不回收） |
+| `login <工号> [--profile <组织ID>]` | 打开钉钉登录流程，登录态存入该员工独立目录；`--profile` 指定授权组织 |
+| `bind <工号> --provider DINGTALK --external-user-id <id>` | 只读校验并绑定钉钉账号（确认账号存在、姓名与声明一致） |
+| `connection <工号>` | 查看某员工的登录态与绑定状态 |
+| `chat <工号> <消息...> [-c <会话ID>]` | 与员工对话，默认展示工具调用过程；`AISTAFF_SHOW_THINKING=1` 时额外展示模型思考 |
+| `conversations <工号>` | 查看历史会话与消息 |
+| `listen <工号> [--stop]` | 启动 / 停止群内 @ 消息自动回复（停止时向子进程发送 SIGTERM 优雅停机） |
+| `loops` | 查看运行中的消息回路 |
+| `audit -n <条数>` | 查看最近审计记录 |
 
-关键环境变量（core 进程）：`AISTAFF_DATA_DIR`（默认 `data/`）、`AISTAFF_AGENT_RUNNER=echo`、`AISTAFF_MODEL_API_KEY`、`AISTAFF_MODEL_PROVIDER`、`AISTAFF_SHOW_THINKING=1`（在 chat 处理过程中展示模型思考，默认关闭且模型侧不产生思考）、`AISTAFF_DWS_BIN`（替换 dws 可执行文件，测试假 CLI 用）。
+## 环境变量（core 进程）
 
-## 验证
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `AISTAFF_PORT` | `3000` | HTTP 端口 |
+| `AISTAFF_DATA_DIR` | `data/` | 员工库、会话库、员工工作目录与登录态目录的根位置（审计库固定在项目 `data/` 下） |
+| `AISTAFF_CONFIG_DIR` | `config/employees` | 员工 YAML 声明目录 |
+| `AISTAFF_AGENT_RUNNER` | `pi` | 设为 `echo` 时使用回显模式，不调用模型 |
+| `AISTAFF_MODEL_API_KEY` / `AISTAFF_MODEL_PROVIDER` | 无 / `anthropic` | 模型凭证；未设置时使用 pi coding agent 自身的登录配置 |
+| `AISTAFF_SHOW_THINKING` | 关 | `1` 时在对话中展示模型思考内容（默认不产生） |
+| `AISTAFF_DWS_BIN` | `dws` | 钉钉命令行工具的可执行文件路径，可指向模拟实现 |
+| `AISTAFF_CORE_URL` | `http://127.0.0.1:3000` | 管理命令行连接的服务地址（命令行进程读取） |
 
-自动化（无外部依赖，假 dws + echo 桩）：
+## 测试与验证
 
 ```bash
-bash scripts/verify-m1.sh && bash scripts/verify-m2.sh \
-  && bash scripts/verify-m3.sh && bash scripts/verify-m4.sh && bash scripts/verify-m5.sh
-pnpm --filter @aistaff/core test
+pnpm --filter @aistaff/core test        # 单元测试
+bash scripts/verify-m1.sh               # 员工声明对齐与工号发放
+bash scripts/verify-m2.sh               # 在职/离职与 guardian 校验
+bash scripts/verify-m3.sh               # 登录托管与绑定校验
+bash scripts/verify-m4.sh               # 对话链路
+bash scripts/verify-m5.sh               # 消息闭环与停机
 ```
 
-真实链路（需人工配合，按需运行；未闭环项与前置条件清单见 `TODO.md`）：
+以上脚本无需钉钉账号和模型凭证：用 `AISTAFF_DWS_BIN` 指向的模拟 `dws`、`AISTAFF_AGENT_RUNNER=echo` 回显模式运行，每个脚本使用独立的临时数据目录，互不污染。已验证的 `dws` 版本为 v1.0.54–v1.0.62。
 
-已对真实 dws v1.0.54 完成契约核验（无需授权即可验证的部分）：`event schema user_im_message_receive_at --flatten` 字段与通道解析一一对应（type 恒为事件键、event_id 去重、sender_open_dingtalk_id 等），其中 `conversation_id` 即 `send --group` 所需 open_conversation_id，收发可直接闭环；不加 `--flatten` 输出为 transport envelope，我们的解析以 flatten 顶层字段为准；`chat message send` argv（含 `-y`）与 `--mock` 实测通过；未登录时 `auth status` 返回 `authenticated:false`（exit 0）、`contact user get`/`event consume` 均 exit 5 + JSON 错误（诊断会进 loop 审计）；停机纪律（SIGTERM/关 stdin，禁 kill -9，新建订阅退出即清理）与实现一致；设备授权链接格式与 live 脚本正则匹配。
+`scripts/verify-m3-live.sh` / `verify-m5-live.sh` 面向真实钉钉环境：设备流登录、只读校验绑定，以及群内 @ → 自动回复。后者需要两个钉钉账号配合（一个在群内发起 @，一个是数字员工本身）。
 
-- `bash scripts/verify-m3-live.sh` — 真实钉钉设备授权 + 只读校验绑定（**2026-09-25 已在 Chating 组织实测闭环**：login→BOUND，姓名精确匹配「小助」；托管环境经 `DWS_DISABLE_KEYCHAIN` 走文件 DEK）
-- `bash scripts/verify-m5-live.sh` — Golden Path：小助 profile 登录后 `listen`，同事群内 @小助 收自动回复；设 `AISTAFF_MODEL_API_KEY` 则走真模型，否则 echo 桩并明示降级（2026-09-25 实测：订阅建立与真实出站回发已通；**同账号自 @ 确认不触发事件**，仅剩"他人 @"一跳需第二钉钉身份，见 TODO.md）
-- 真实模型对话：设置 Key 后重跑 `verify-m4.sh` step 6（PROBE_BLOCKED → PROBE_OK）
+## 仓库结构
+
+```
+apps/core/   常驻服务：员工目录、账号绑定、Agent 运行时、消息闭环、审计
+apps/cli/    aistaff 管理命令行，经 core 的 HTTP 接口操作
+config/      员工 YAML 声明
+scripts/     测试与验证脚本
+docs/        设计文档
+```
