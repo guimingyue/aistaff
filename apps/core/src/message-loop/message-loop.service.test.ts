@@ -45,14 +45,38 @@ class ReplyRunner implements AgentRunner {
   readonly kind = 'fake';
   readonly requests: RunTurnRequest[] = [];
   failNext: Error | undefined;
+  delayMs = 0;
+  concurrent = 0;
+  maxConcurrent = 0;
+
   async runTurn(req: RunTurnRequest): Promise<RunTurnResult> {
     this.requests.push(req);
-    if (this.failNext) {
-      const err = this.failNext;
-      this.failNext = undefined;
-      throw err;
+    this.concurrent += 1;
+    this.maxConcurrent = Math.max(this.maxConcurrent, this.concurrent);
+    try {
+      if (this.failNext) {
+        const err = this.failNext;
+        this.failNext = undefined;
+        throw err;
+      }
+      if (this.delayMs > 0) {
+        const delay = this.delayMs;
+        await new Promise<void>((resolveDelay, rejectDelay) => {
+          const timer = setTimeout(resolveDelay, delay);
+          req.signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              rejectDelay(new Error('aborted by signal'));
+            },
+            { once: true },
+          );
+        });
+      }
+      return { replyText: `答：${req.message}`, sessionFile: join(req.workspaceDir, 'loop-session.jsonl') };
+    } finally {
+      this.concurrent -= 1;
     }
-    return { replyText: `答：${req.message}`, sessionFile: join(req.workspaceDir, 'loop-session.jsonl') };
   }
 }
 
@@ -230,6 +254,36 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
     );
   });
 
+  it('同群不同发送人：各自独立会话，上下文不串台', async () => {
+    const runsBefore = runner.requests.length;
+    const sentBefore = channel.sent.length;
+    channel.emit(
+      ev({
+        eventId: 'evt-sender-b',
+        senderName: '丙弟',
+        senderOpenDingTalkId: 'open-bd',
+        content: '我刚才问了什么？',
+      }),
+    );
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    await waitFor(() => channel.sent.length === sentBefore + 1);
+
+    assert.equal(runner.requests.at(-1)!.sessionFile, undefined, '新发送人首轮必须开新 Agent 会话');
+    assert.equal(channel.sent.at(-1)!.to, 'cid-group-a', '回发目标仍是原群');
+
+    const a1 = await staffPrisma.employee.findUniqueOrThrow({ where: { employeeNo: 'AI000001' } });
+    const convs = await sessionsPrisma.conversation.findMany({
+      where: { employeeId: a1.id, channel: 'DINGTALK' },
+      orderBy: { createdAt: 'asc' },
+    });
+    assert.deepEqual(convs.map((c) => c.externalSenderId), ['open-yj', 'open-bd']);
+    assert.equal(convs.every((c) => c.externalId === 'cid-group-a'), true);
+    const userMsgs = await sessionsPrisma.message.findMany({
+      where: { conversationId: convs[1].id, role: 'user' },
+    });
+    assert.equal(userMsgs[0].senderExternalUserId, 'open-bd');
+  });
+
   it('eventId 去重：同一事件重复投递只处理一次', async () => {
     const sentBefore = channel.sent.length;
     channel.emit(ev({ eventId: 'evt-dup' }));
@@ -241,8 +295,9 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
 
   it('非文本消息：一期降级为暂不支持提示，不触发 Agent', async () => {
     const runsBefore = runner.requests.length;
+    const sentBefore = channel.sent.length;
     channel.emit(ev({ eventId: 'evt-non-text', content: '' }));
-    await waitFor(() => channel.sent.length === 4);
+    await waitFor(() => channel.sent.length === sentBefore + 1);
     assert.match(channel.sent.at(-1)!.text, /暂不支持|只能处理文本/);
     assert.equal(runner.requests.length, runsBefore);
   });
@@ -260,6 +315,80 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
     );
     channel.sendFail = false;
     assert.equal(loops.status().length, 1, '失败不得让闭环退出');
+  });
+
+  it('单轮超时：中止 Agent、记 message.error(timedOut) 并回发提示，闭环存活', async () => {
+    process.env.AISTAFF_LOOP_TURN_TIMEOUT_MS = '60';
+    runner.delayMs = 5000;
+    const sentBefore = channel.sent.length;
+    channel.emit(ev({ eventId: 'evt-timeout', senderName: '慢郎', senderOpenDingTalkId: 'open-slow' }));
+
+    await waitFor(() =>
+      audits.some((a) => a.action === 'message.error' && JSON.stringify(a.detail)?.includes('timed out')),
+    );
+    const timeoutAudit = audits.find(
+      (a) => a.action === 'message.error' && JSON.stringify(a.detail)?.includes('timed out'),
+    )!;
+    assert.equal((timeoutAudit.detail as { timedOut: boolean }).timedOut, true);
+    assert.equal(runner.requests.at(-1)!.signal?.aborted, true, '取消信号必须传到 Agent 运行');
+
+    await waitFor(() => channel.sent.length === sentBefore + 1);
+    assert.match(channel.sent.at(-1)!.text, /超时/);
+    assert.equal(loops.status().length, 1, '超时不得让闭环退出');
+
+    runner.delayMs = 0;
+    delete process.env.AISTAFF_LOOP_TURN_TIMEOUT_MS;
+  });
+
+  it('并发闸门：MAX_CONCURRENT=1 全局串行，放宽后不同发送人可并行', async () => {
+    runner.delayMs = 60;
+
+    process.env.AISTAFF_LOOP_MAX_CONCURRENT = '1';
+    runner.maxConcurrent = 0;
+    let sentBefore = channel.sent.length;
+    for (const id of ['s1', 's2', 's3']) {
+      channel.emit(ev({ eventId: `evt-ser-${id}`, senderName: `同事${id}`, senderOpenDingTalkId: `open-${id}`, content: `串行${id}` }));
+    }
+    await waitFor(() => channel.sent.length === sentBefore + 3, 8000);
+    assert.equal(runner.maxConcurrent, 1, '并发上限为 1 时必须全局串行');
+
+    process.env.AISTAFF_LOOP_MAX_CONCURRENT = '3';
+    runner.maxConcurrent = 0;
+    sentBefore = channel.sent.length;
+    for (const id of ['p1', 'p2', 'p3']) {
+      channel.emit(ev({ eventId: `evt-par-${id}`, senderName: `同事${id}`, senderOpenDingTalkId: `open-${id}`, content: `并行${id}` }));
+    }
+    await waitFor(() => channel.sent.length === sentBefore + 3, 8000);
+    assert.ok(runner.maxConcurrent > 1, `放宽上限后应可并行，实际 maxConcurrent=${runner.maxConcurrent}`);
+
+    runner.delayMs = 0;
+    delete process.env.AISTAFF_LOOP_MAX_CONCURRENT;
+  });
+
+  it('队列上限：积压超限的消息被丢弃、记 message.dropped 并回发提示', async () => {
+    process.env.AISTAFF_LOOP_MAX_QUEUED = '2';
+    process.env.AISTAFF_LOOP_MAX_CONCURRENT = '1';
+    runner.delayMs = 200;
+    const sentBefore = channel.sent.length;
+    for (const n of [1, 2, 3, 4]) {
+      channel.emit(
+        ev({ eventId: `evt-q-${n}`, senderName: '排队君', senderOpenDingTalkId: 'open-q', content: `第${n}条` }),
+      );
+    }
+    await waitFor(() => audits.filter((a) => a.action === 'message.dropped').length === 2);
+    const dropped = audits.filter((a) => a.action === 'message.dropped');
+    assert.match(JSON.stringify(dropped[0].detail), /loop queue full/);
+    await waitFor(() => channel.sent.filter((s) => s.text.includes('积压较多')).length === 2);
+
+    runner.delayMs = 0;
+    // 已受理的两条仍要正常回发，丢弃不得影响在跑的队列
+    await waitFor(() => channel.sent.length >= sentBefore + 4, 8000);
+    assert.ok(channel.sent.some((s) => s.text === '答：第1条'));
+    assert.ok(channel.sent.some((s) => s.text === '答：第2条'));
+    assert.equal(loops.status()[0].dropped, 2);
+
+    delete process.env.AISTAFF_LOOP_MAX_QUEUED;
+    delete process.env.AISTAFF_LOOP_MAX_CONCURRENT;
   });
 
   it('stop：优雅停机 + loop.stop 审计 + 状态清空；重复 start 拒绝', async () => {

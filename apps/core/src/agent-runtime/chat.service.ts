@@ -15,6 +15,18 @@ export interface ChatResult {
   durationMs: number;
 }
 
+export interface ChatOptions {
+  actor: string;
+  conversationId?: string;
+  channel?: string;
+  /** 三方会话标识（如钉钉 openConversationId）：同员工同通道同标识复用同一 Conversation */
+  externalConversationId?: string;
+  /** 群内发送人标识：同一群里不同成员各自独立上下文，互不串台 */
+  senderExternalUserId?: string;
+  /** 取消信号：消息回路超时或停机时中止本轮 Agent 运行 */
+  signal?: AbortSignal;
+}
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -34,13 +46,7 @@ export class ChatService {
   async chat(
     employeeNo: string,
     message: string,
-    opts: {
-      actor: string;
-      conversationId?: string;
-      channel?: string;
-      /** 三方会话标识（如钉钉 openConversationId）：同员工同通道同标识复用同一 Conversation */
-      externalConversationId?: string;
-    },
+    opts: ChatOptions,
   ): Promise<ChatResult> {
     const startedAt = Date.now();
     const ctx: { conversationId?: string } = {};
@@ -64,12 +70,7 @@ export class ChatService {
   private async chatInner(
     employeeNo: string,
     message: string,
-    opts: {
-      actor: string;
-      conversationId?: string;
-      channel?: string;
-      externalConversationId?: string;
-    },
+    opts: ChatOptions,
     startedAt: number,
     ctx: { conversationId?: string },
   ): Promise<ChatResult> {
@@ -96,9 +97,15 @@ export class ChatService {
       }
     } else {
       const channel = opts.channel ?? 'CONSOLE';
+      const senderId = opts.senderExternalUserId ?? null;
       if (opts.externalConversationId) {
         conversation = await this.prisma.sessions.conversation.findFirst({
-          where: { employeeId: employee.id, channel, externalId: opts.externalConversationId },
+          where: {
+            employeeId: employee.id,
+            channel,
+            externalId: opts.externalConversationId,
+            externalSenderId: senderId,
+          },
         });
       }
       if (!conversation) {
@@ -107,6 +114,7 @@ export class ChatService {
             employeeId: employee.id,
             channel,
             externalId: opts.externalConversationId,
+            externalSenderId: senderId,
           },
         });
       }
@@ -126,12 +134,18 @@ export class ChatService {
       message,
       workspaceDir: this.workspaceDir(employeeNo),
       sessionFile: conversation.agentSessionFile ?? undefined,
+      signal: opts.signal,
       onEvent: (ev) => steps.push(ev),
     };
     mkdirSync(turnReq.workspaceDir, { recursive: true });
 
     await this.prisma.sessions.message.create({
-      data: { conversationId: conversation.id, role: 'user', content: message },
+      data: {
+        conversationId: conversation.id,
+        role: 'user',
+        content: message,
+        senderExternalUserId: opts.senderExternalUserId ?? null,
+      },
     });
 
     const result = await this.runner.runTurn(turnReq);

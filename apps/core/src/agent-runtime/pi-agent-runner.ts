@@ -49,6 +49,9 @@ export class PiAgentRunner implements AgentRunner {
   }
 
   async runTurn(req: RunTurnRequest): Promise<RunTurnResult> {
+    if (req.signal?.aborted) {
+      throw new Error(`employee ${req.employeeNo}: agent turn cancelled before start`);
+    }
     const pi = await loadSdk();
     mkdirSync(req.workspaceDir, { recursive: true });
     const agentDir = resolve(req.workspaceDir, '.aistaff-agent');
@@ -128,8 +131,20 @@ export class PiAgentRunner implements AgentRunner {
           }
         })
       : undefined;
+    // 超时/停机取消：pi 的 prompt 不接受 signal，用 abort() 打断后按取消语义抛错
+    const onAbort = req.signal ? () => void session.abort() : undefined;
+    if (req.signal && onAbort) {
+      if (req.signal.aborted) {
+        session.dispose();
+        throw new Error(`employee ${req.employeeNo}: agent turn cancelled`);
+      }
+      req.signal.addEventListener('abort', onAbort, { once: true });
+    }
     try {
       await session.prompt(req.message);
+      if (req.signal?.aborted) {
+        throw new Error(`employee ${req.employeeNo}: agent turn cancelled`);
+      }
       const replyText = session.getLastAssistantText() ?? '';
       if (!replyText.trim()) {
         throw new Error(`employee ${req.employeeNo}: agent turn produced no text reply`);
@@ -140,6 +155,7 @@ export class PiAgentRunner implements AgentRunner {
       }
       return { replyText, sessionFile: finalSessionFile, modelUsed };
     } finally {
+      if (req.signal && onAbort) req.signal.removeEventListener('abort', onAbort);
       unsubscribe?.();
       session.dispose();
     }

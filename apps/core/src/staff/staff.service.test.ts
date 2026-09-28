@@ -166,4 +166,24 @@ describe('发号器与不变式（真实 SQLite）', () => {
     await staff.changeStatus('000002', 'SUSPENDED');
     await staff.changeStatus('000002', 'ACTIVE');
   });
+
+  it('解析保护：protectKeys 阻止误删，skipRemoval 整轮不删人，缺省仍正常删除', async () => {
+    await staff.syncFromConfigs(config(base()));
+    const fourKeys = ['g1', 'g2', 'a1', 'a2'];
+    const countFour = () => prisma.employee.count({ where: { configKey: { in: fourKeys } } });
+
+    // g2/a2 的声明文件解析失败：不在 declared 里，但被列为受保护 key
+    const protectedRound = await staff.syncFromConfigs(config({ g1: human(), a1: digital('g1') }), {
+      protectKeys: ['g2', 'a2'],
+    });
+    assert.deepEqual(protectedRound.removed, []);
+    assert.equal(await countFour(), 4);
+
+    const skipped = await staff.syncFromConfigs(new Map<string, EmployeeConfig>(), { skipRemoval: true });
+    assert.deepEqual(skipped.removed, []);
+    assert.equal(await countFour(), 4);
+
+    const removedRound = await staff.syncFromConfigs(config({ g1: human(), a1: digital('g1') }));
+    assert.deepEqual([...removedRound.removed].sort(), ['a2', 'g2']);
+  });
 });

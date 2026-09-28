@@ -55,3 +55,30 @@ export function parseJsonLoose(text: string): unknown {
     return null;
   }
 }
+
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * 标识符类外部输入（会话 ID、三方用户 ID）收口为 `--flag=value` 单 argv：
+ * 值以 `-` 开头时会被 CLI 当成旗标解析，`=` 形式消除该歧义（dws v1.0.62 实测支持）。
+ */
+export function cliIdArg(flag: string, value: string): string {
+  if (!value || value.length > 512) {
+    throw new Error(`${flag}: identifier must be 1-512 characters`);
+  }
+  if (value.startsWith('-')) {
+    throw new Error(`${flag}: identifier must not start with "-"`);
+  }
+  if (CONTROL_CHARS.test(value)) {
+    throw new Error(`${flag}: identifier must not contain control characters`);
+  }
+  return `--${flag}=${value}`;
+}
+
+/** 自由文本（消息正文，来自模型输出）：内容不做字符限制，仅排除 NUL，同样用 `=` 形式传递。 */
+export function cliTextArg(flag: string, value: string): string {
+  if (value.includes('\u0000')) {
+    throw new Error(`${flag}: text must not contain NUL characters`);
+  }
+  return `--${flag}=${value}`;
+}

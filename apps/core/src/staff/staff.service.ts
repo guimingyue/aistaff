@@ -8,6 +8,13 @@ export interface SyncResult {
   rejected: Array<{ configKey: string; reason: string }>;
 }
 
+export interface SyncOptions {
+  /** 声明文件存在但解析/校验失败：这些 key 仍算“已声明”，禁止当作孤儿删除。 */
+  protectKeys?: readonly string[];
+  /** 配置目录整体不可读：本轮跳过删除，避免把全量员工误判为孤儿。 */
+  skipRemoval?: boolean;
+}
+
 type StaffTx = Prisma.TransactionClient;
 
 const TRANSITIONS: Record<string, string[]> = {
@@ -39,8 +46,12 @@ export class StaffService {
    * 以声明集为期望状态同步 staff 库。
    * 两阶段：HUMAN 先落库发号，DIGITAL 后落库（guardian 必须解析为在职真人）。
    * 工号一经发放永不变更；缺失时补挂；guardian 校验失败或类型冲突的声明进入 rejected。
+   * 解析失败的声明文件不等于“撤销声明”：由 opts.protectKeys / opts.skipRemoval 挡住误删。
    */
-  async syncFromConfigs(declared: Map<string, EmployeeConfig>): Promise<SyncResult> {
+  async syncFromConfigs(
+    declared: Map<string, EmployeeConfig>,
+    opts: SyncOptions = {},
+  ): Promise<SyncResult> {
     return this.prisma.staff.$transaction(async (tx) => {
       const rejected: SyncResult['rejected'] = [];
 
@@ -151,9 +162,12 @@ export class StaffService {
       }
 
       const removed: string[] = [];
-      const keys = [...declared.keys()];
+      if (opts.skipRemoval) {
+        return { removed, rejected };
+      }
+      const declaredKeys = [...declared.keys(), ...(opts.protectKeys ?? [])];
       const orphans = await tx.employee.findMany({
-        where: keys.length ? { configKey: { notIn: keys } } : {},
+        where: declaredKeys.length ? { configKey: { notIn: declaredKeys } } : {},
         select: { id: true, configKey: true, employeeNo: true },
       });
       for (const orphan of orphans) {

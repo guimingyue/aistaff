@@ -6,6 +6,13 @@ import { employeeConfigSchema, EmployeeConfig } from './employee-config.schema';
 import { StaffService } from '../staff/staff.service';
 import { AuditService } from '../audit/audit.service';
 
+export interface LoadedConfigs {
+  declared: Map<string, EmployeeConfig>;
+  /** 文件存在但 YAML/Schema 校验失败：不得据此删除已有员工。 */
+  invalid: Array<{ configKey: string; reason: string }>;
+  dirAvailable: boolean;
+}
+
 @Injectable()
 export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
   readonly configDir = path.resolve(
@@ -39,14 +46,36 @@ export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sync(): Promise<void> {
-    const declared = await this.loadConfigs();
-    const { removed, rejected } = await this.staff.syncFromConfigs(declared);
+    const { declared, invalid, dirAvailable } = await this.loadConfigs();
+    // 解析失败的声明文件仍算“已声明”，配置目录不可读时整轮不删人：
+    // 否则一次手滑的 YAML 语法错误就会把在职员工连同绑定一起清掉。
+    const { removed, rejected } = await this.staff.syncFromConfigs(declared, {
+      protectKeys: invalid.map((i) => i.configKey),
+      skipRemoval: !dirAvailable,
+    });
     for (const [configKey, cfg] of declared) {
       await this.audit.record({
         actor: 'system',
         action: 'config.reconcile.upsert',
         target: configKey,
         detail: { name: cfg.name, type: cfg.type },
+      });
+    }
+    for (const i of invalid) {
+      await this.audit.record({
+        actor: 'system',
+        action: 'config.reconcile.invalid',
+        target: i.configKey,
+        detail: { reason: i.reason },
+      });
+      this.logger.error(`invalid config ${i.configKey}: ${i.reason} (kept existing employee, removal blocked)`);
+    }
+    if (!dirAvailable) {
+      await this.audit.record({
+        actor: 'system',
+        action: 'config.reconcile.skip',
+        target: this.configDir,
+        detail: { reason: 'config directory unreadable; employee removal skipped for this round' },
       });
     }
     for (const configKey of removed) {
@@ -61,27 +90,30 @@ export class ConfigSyncService implements OnModuleInit, OnModuleDestroy {
       });
       this.logger.warn(`reject ${r.configKey}: ${r.reason}`);
     }
-    this.logger.log(`reconcile done: ${declared.size} declared, ${removed.length} removed, ${rejected.length} rejected`);
+    this.logger.log(
+      `reconcile done: ${declared.size} declared, ${invalid.length} invalid, ${removed.length} removed, ${rejected.length} rejected`,
+    );
   }
 
-  private async loadConfigs(): Promise<Map<string, EmployeeConfig>> {
-    const result = new Map<string, EmployeeConfig>();
+  private async loadConfigs(): Promise<LoadedConfigs> {
+    const declared = new Map<string, EmployeeConfig>();
+    const invalid: Array<{ configKey: string; reason: string }> = [];
     let files: string[];
     try {
       files = (await fs.readdir(this.configDir)).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
-    } catch {
-      this.logger.warn(`config dir not found: ${this.configDir}`);
-      return result;
+    } catch (err) {
+      this.logger.warn(`config dir not readable: ${this.configDir}: ${(err as Error).message}`);
+      return { declared, invalid, dirAvailable: false };
     }
     for (const file of files) {
       const configKey = file.replace(/\.ya?ml$/, '');
       try {
         const raw = await fs.readFile(path.join(this.configDir, file), 'utf8');
-        result.set(configKey, employeeConfigSchema.parse(YAML.parse(raw)));
+        declared.set(configKey, employeeConfigSchema.parse(YAML.parse(raw)));
       } catch (err) {
-        this.logger.error(`invalid config ${file}: ${(err as Error).message}`);
+        invalid.push({ configKey, reason: (err as Error).message.slice(0, 500) });
       }
     }
-    return result;
+    return { declared, invalid, dirAvailable: true };
   }
 }

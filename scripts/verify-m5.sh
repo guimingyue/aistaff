@@ -75,11 +75,15 @@ grep -q 'm5-pwned' "$DWS_DIR/sent.ndjson" || fail "注入样本未原样回显"
 [ ! -f /tmp/m5-pwned ] || fail "出现 shell 注入副作用文件"
 grep -c '"to":"cid-m5-group"' "$DWS_DIR/sent.ndjson" | grep -q '^3$' || fail "回发目标会话不正确"
 
-step "4/7 sessions.db：DINGTALK 会话复用与消息持久化"
+step "4/7 sessions.db：群内按发送人隔离会话 + 消息持久化"
 cnt=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT COUNT(*) FROM Conversation WHERE channel='DINGTALK' AND externalId='cid-m5-group';")
-[ "$cnt" = "1" ] || fail "期望 1 条 DINGTALK 会话，实际 $cnt"
+[ "$cnt" = "2" ] || fail "期望 2 条 DINGTALK 会话（open-zs / open-e1 各一条），实际 $cnt"
+senders=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT externalSenderId FROM Conversation WHERE externalId='cid-m5-group' ORDER BY externalSenderId;" | paste -sd, -)
+[ "$senders" = "open-e1,open-zs" ] || fail "会话发送人隔离不正确：$senders"
 msgs=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT COUNT(*) FROM Message m JOIN Conversation c ON m.conversationId=c.id WHERE c.externalId='cid-m5-group';")
 [ "$msgs" = "4" ] || fail "期望 4 条消息（2问2答），实际 $msgs"
+tagged=$(sqlite3 "$DATA_DIR/sessions.db" "SELECT COUNT(*) FROM Message WHERE role='user' AND senderExternalUserId IS NOT NULL;")
+[ "$tagged" -ge 2 ] || fail "入站消息未记录发送人标识"
 
 step "5/7 审计链完整：loop.start / message.inbound×3 / agent.run / message.outbound×3"
 sqlite3 data/audit.db "SELECT action, COUNT(*) FROM AuditEvent WHERE action IN ('loop.start','message.inbound','agent.run','message.outbound') GROUP BY action;"

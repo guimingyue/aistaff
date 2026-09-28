@@ -186,7 +186,7 @@ program
     }
     for (const l of loops) {
       console.log(
-        `${l.employeeNo}  startedAt=${l.startedAt}  processed=${l.processed}  errors=${l.errors}  last=${String(l.lastDiagnostic ?? '-').slice(0, 80)}`,
+        `${l.employeeNo}  startedAt=${l.startedAt}  processed=${l.processed}  errors=${l.errors}  dropped=${l.dropped ?? 0}  queued=${l.queued ?? 0}  inflight=${l.inflight ?? 0}  last=${String(l.lastDiagnostic ?? '-').slice(0, 80)}`,
       );
     }
   });

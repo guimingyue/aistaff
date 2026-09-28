@@ -13,6 +13,8 @@ model Conversation {
   employeeId       String
   channel          String? // DINGTALK | FEISHU | CONSOLE
   externalId       String? // 三方会话/群标识
+  /// 群内按发送人隔离上下文：同一群里不同成员各自一条会话（null = 未按发送人区分）
+  externalSenderId String?
   /// pi Agent 会话档案（jsonl 文件路径），用于跨轮次上下文延续
   agentSessionFile String?
   createdAt        DateTime @default(now())
@@ -21,6 +23,7 @@ model Conversation {
   messages Message[]
 
   @@index([employeeId])
+  @@index([employeeId, channel, externalId, externalSenderId])
 }
 
 model Message {

@@ -8,7 +8,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path';
 
 const [sub, ...rest] = process.argv.slice(2);
+// 与真实 dws（cobra）对齐：同时接受 `--flag value` 与 `--flag=value`
 const flag = (name) => {
+  const eq = rest.find((a) => a.startsWith(`--${name}=`));
+  if (eq !== undefined) return eq.slice(name.length + 3);
   const i = rest.indexOf(`--${name}`);
   return i >= 0 ? rest[i + 1] : undefined;
 };
@@ -61,8 +64,13 @@ if (sub === 'contact' && rest[0] === 'user' && rest[1] === 'get') {
   });
 }
 if (sub === 'chat' && rest[0] === 'message' && rest[1] === 'send') {
-  const to = flag('group') ?? flag('user') ?? flag('open-dingtalk-id');
-  const text = flag('text') ?? rest[rest.length - 1];
+  const to = flag('group') ?? flag('conversation-id') ?? flag('user') ?? flag('open-dingtalk-id');
+  // 只认 dws 文档旗标 --content：调用方若漂移到未文档化别名，这里直接失败暴露契约
+  const text = flag('content');
+  if (to === undefined || text === undefined) {
+    console.error(`fake-dws: send requires --group/--conversation-id/--user and --content, got ${rest.join(' ')}`);
+    process.exit(2);
+  }
   if (process.env.FAKE_SEND_FAIL === '1') {
     console.error('fake-dws: send failed (injected)');
     process.exit(1);

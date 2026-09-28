@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DirectoryAdapter, AuthStatus, DirectoryUser } from './directory-adapter';
-import { runCli, runCliInteractive, parseJsonLoose } from './cli-invoker';
+import { runCli, runCliInteractive, parseJsonLoose, cliIdArg } from './cli-invoker';
 
 /** 每员工独立 CLI profile：HOME/XDG 与 DWS_CONFIG_DIR 全部指向专属目录，平台不触碰 token 本体。 */
 export function isolatedEnv(
@@ -54,7 +54,7 @@ export class DingtalkAdapter implements DirectoryAdapter {
   async verifyUser(externalUserId: string): Promise<DirectoryUser | null> {
     const res = await runCli(
       this.bin,
-      ['contact', 'user', 'get', '--ids', externalUserId, '-f', 'json'],
+      ['contact', 'user', 'get', cliIdArg('ids', externalUserId), '-f', 'json'],
       this.env,
     );
     if (res.code !== 0) return null;
@@ -84,7 +84,7 @@ export class DingtalkAdapter implements DirectoryAdapter {
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(orgProfile)) {
         throw new Error(`invalid organization ID format: ${orgProfile.slice(0, 20)}`);
       }
-      args.push('--profile', orgProfile);
+      args.push(`--profile=${orgProfile}`);
     }
     return runCliInteractive(this.bin, args, this.env);
   }

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { DingtalkAdapter, isolatedEnv } from '../connections/dingtalk.adapter';
-import { runCli, parseJsonLoose } from '../connections/cli-invoker';
+import { runCli, parseJsonLoose, cliIdArg, cliTextArg } from '../connections/cli-invoker';
 import { InboundMessage, LoopChannel, LoopProvider } from './channel';
 
 interface AtEventPayload {
@@ -17,10 +17,10 @@ interface AtEventPayload {
 /**
  * 钉钉 @消息闭环通道（设计 §5.3）：
  * 接收 = `dws event consume user_im_message_receive_at --flatten`（个人事件长连接，NDJSON）；
- * 发送 = `dws chat message send --group <openConversationId> --text ...`（以员工身份回发）。
+ * 发送 = `dws chat message send --group=<openConversationId> --content=<文本>`（以员工身份回发）。
  * 停止按官方纪律 SIGTERM/关 stdin，绝不 kill -9（会泄漏服务端订阅）。
  */
-class DwsAtChannel implements LoopChannel {
+export class DwsAtChannel implements LoopChannel {
   private child?: ChildProcessWithoutNullStreams;
 
   constructor(
@@ -82,7 +82,7 @@ class DwsAtChannel implements LoopChannel {
   async send(conversationId: string, text: string): Promise<void> {
     const res = await runCli(
       this.bin,
-      ['chat', 'message', 'send', '--group', conversationId, '--text', text, '-y', '-f', 'json'],
+      ['chat', 'message', 'send', cliIdArg('group', conversationId), cliTextArg('content', text), '-y', '-f', 'json'],
       this.env,
     );
     const parsed = parseJsonLoose(res.stdout) as { success?: boolean } | null;

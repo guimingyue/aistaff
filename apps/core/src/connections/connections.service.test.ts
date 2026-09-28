@@ -134,7 +134,7 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     assert.ok(env.XDG_CONFIG_HOME.startsWith(env.HOME));
   });
 
-  it('argv 注入防线：含 shell 元字符的 ID 原样单参数传递，不产生文件副作用', async () => {
+  it('argv 注入防线：含 shell 元字符的 ID 收口为单个 --ids= 参数，不产生文件副作用', async () => {
     fakeState.auth = '1';
     fakeState.users = {};
     fakeState.argvOut = join(dir, 'argv-inject.log');
@@ -146,8 +146,21 @@ describe('connections 绑定校验（假 CLI + 真实 SQLite）', () => {
     const argvs = lastArgvLines();
     const contactCall = argvs.find((a) => a[0] === 'contact');
     assert.ok(contactCall);
-    assert.ok(contactCall.includes(evil), 'evil id 必须原样作为单个 argv token');
+    assert.ok(contactCall.includes(`--ids=${evil}`), 'evil id 必须原样作为单个 --ids= argv token');
     assert.equal(existsSync(join(dir, 'pwned')), false);
+  });
+
+  it('argv 收口：以 - 开头的 ID 在调用 CLI 之前被拒', async () => {
+    fakeState.argvOut = join(dir, 'argv-dash.log');
+    await assert.rejects(
+      () => connections.bind({ employeeNo: '000001', provider: 'DINGTALK', externalUserId: '--at-all' }, 'tester'),
+      /must not start with "-"/,
+    );
+    assert.equal(
+      lastArgvLines().some((a) => a[0] === 'contact'),
+      false,
+      '非法 ID 不得产生 contact 查询调用',
+    );
   });
 
   it('login 托管：exitCode 返回并审计', async () => {

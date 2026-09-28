@@ -193,6 +193,37 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
     assert.notEqual(conv.id, other.conversationId);
   });
 
+  it('群内按发送人隔离：同群不同人各自会话，同人追问延续自己的上下文', async () => {
+    const opts = (sender: string) => ({
+      actor: `dingtalk:${sender}`,
+      channel: 'DINGTALK',
+      externalConversationId: 'cid-group-x',
+      senderExternalUserId: sender,
+    });
+    const r1 = await chat.chat('AI000001', '甲的问题', opts('open-a'));
+    const r2 = await chat.chat('AI000001', '乙的问题', opts('open-b'));
+    assert.notEqual(r1.conversationId, r2.conversationId, '同群不同发送人不得共享会话');
+
+    const convs = await sessionsPrisma.conversation.findMany({
+      where: { externalId: 'cid-group-x' },
+      orderBy: { createdAt: 'asc' },
+    });
+    assert.deepEqual(convs.map((c) => c.externalSenderId), ['open-a', 'open-b']);
+    assert.notEqual(convs[0].agentSessionFile, convs[1].agentSessionFile);
+
+    const r3 = await chat.chat('AI000001', '甲追问', opts('open-a'));
+    assert.equal(r3.conversationId, r1.conversationId);
+    assert.equal(runner.requests.at(-1)!.sessionFile, convs[0].agentSessionFile, '同人追问必须延续原会话档案');
+
+    const msgs = await messagesOf(r1.conversationId);
+    assert.deepEqual(
+      msgs.map((m) => m.role),
+      ['user', 'assistant', 'user', 'assistant'],
+    );
+    assert.equal(msgs[0].senderExternalUserId, 'open-a');
+    assert.equal(msgs[1].senderExternalUserId, null);
+  });
+
   it('runner 失败：用户消息留档、reject 审计含原因', async () => {
     runner.failNext = new Error('模型爆炸');
     const before_ = audits.length;
