@@ -22,7 +22,16 @@ export interface RunTurnRequest {
 export type AgentStepEvent =
   | { type: 'tool_call'; toolName: string; argsPreview?: string }
   | { type: 'tool_result'; toolName: string; isError: boolean; resultPreview?: string }
-  | { type: 'thinking'; text: string };
+  | { type: 'thinking'; text: string }
+  /** 上下文压缩：长会话每次请求前触发，多花一次模型调用，用于解释耗时 */
+  | {
+      type: 'compaction';
+      reason: 'manual' | 'threshold' | 'overflow';
+      ok: boolean;
+      tokensBefore?: number;
+      estimatedTokensAfter?: number;
+      errorMessage?: string;
+    };
 
 export interface RunTurnResult {
   replyText: string;

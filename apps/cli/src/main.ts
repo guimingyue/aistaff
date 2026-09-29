@@ -118,7 +118,7 @@ program
     const result = await corePost<{
       conversationId: string;
       replyText: string;
-      steps?: Array<{ type: string; toolName?: string; isError?: boolean; argsPreview?: string; resultPreview?: string; text?: string }>;
+      steps?: Array<{ type: string; toolName?: string; isError?: boolean; argsPreview?: string; resultPreview?: string; text?: string; reason?: string; ok?: boolean; tokensBefore?: number; estimatedTokensAfter?: number }>;
       modelUsed?: string;
       durationMs: number;
     }>(`/employees/${encodeURIComponent(employeeNo)}/chat`, {
@@ -132,6 +132,10 @@ program
         console.log(`[tool] ${s.toolName} ${s.isError ? 'FAILED' : 'ok'}${s.resultPreview ? ` -> ${s.resultPreview}` : ''}`);
       } else if (s.type === 'thinking') {
         console.log(`[thinking] ${s.text}`);
+      } else if (s.type === 'compaction') {
+        console.log(
+          `[compact] ${s.reason} ${s.ok ? 'ok' : 'FAILED'}${s.tokensBefore ? ` ${s.tokensBefore}→${s.estimatedTokensAfter ?? '?'} tokens` : ''}`,
+        );
       }
     }
     console.log(`[${result.conversationId}${result.modelUsed ? ` ${result.modelUsed}` : ''}] ${result.replyText}`);

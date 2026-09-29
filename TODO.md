@@ -1,6 +1,6 @@
 # 待办（一期 MVP 未闭环项）
 
-M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、47/47 单测）。以下环节因**外部条件不具备**尚未完成真实环境实测，均已在本文档如实记录，非代码缺口。
+M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、50/50 单测）。以下环节因**外部条件不具备**尚未完成真实环境实测，均已在本文档如实记录，非代码缺口。
 
 ## ✅ 2026-09-25 真实环境进展（Chating 组织）
 - 真实 login + bind **已闭环**：组织开放 CLI 数据访问后，`aistaff login AI000001 --profile <corpId>` 设备授权成功，`bind` 只读校验姓名「小助」→ **BOUND（M3-live 达成）**；`listen` 订阅真实建立（bus state=connected）；CLI 真实出站回发成功（消息落定 openMessageId，`query-send-status` 可查）。
@@ -15,6 +15,7 @@ M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、4
 ## 2. 真实模型员工对话（M4）
 - 阻塞：本机无 `AISTAFF_MODEL_API_KEY`（也无 ANTHROPIC_API_KEY）。
 - 验证：设置 Key 后重跑 `bash scripts/verify-m4.sh` step 6（PROBE_BLOCKED → PROBE_OK）。
+- 一并待实测：长会话的上下文压缩已默认开启（`AISTAFF_AGENT_COMPACTION`，见 README 环境变量），压缩发生时会在对话过程里透出 `[compact]` 一行；因压缩多一次模型调用，单轮超时 `AISTAFF_LOOP_TURN_TIMEOUT_MS`（默认 180s）是否合适需在有模型 Key 时确认。
 
 ## 3. Agent 执行沙箱（方案待设计）
 - 现状：数字员工的 Agent 运行在 `data/workspaces/<工号>/` 下，默认具备 bash 与文件写权限，与宿主进程同权限。
@@ -37,7 +38,6 @@ M1–M5 代码与自动化验证已全部完成（`verify-m1…m5.sh` 全绿、4
 - HTTP 异常统一映射 400，缺 404/409/500 区分。
 - CWD 相对默认路径在 4 处重复实现，易漂移。
 - `PiAgentRunner.modelRuntime` 缓存被拒绝的 Promise 后永久毒化。
-- pi `compaction` 关闭，长会话上下文会无限增长。
 - `seen` 超 5000 清空，重复投递可能二次处理。
 - `channel.stop()` 10s 超时后静默返回，不报告未退出。
 - 通道 `start()` 以 `setImmediate` 视作挂载成功，spawn 失败异步才暴露。

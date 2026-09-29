@@ -19,6 +19,27 @@ function loadSdk(): Promise<PiSdk> {
   return sdkPromise;
 }
 
+/** 未设置/非法值都回落到 pi 的内置默认，避免因配置写法把压缩关掉。 */
+function positiveInt(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * pi 的上下文压缩配置（默认开启）：每次请求前按 `contextTokens > contextWindow - reserveTokens`
+ * 判定，命中则把较早的条目摘要成一条 compactionSummary、保留最近 keepRecentTokens 原文、重载会话。
+ * 关掉它长会话迟早撑爆上下文窗口而无法工作，因此只保留开关与两个阈值的调节口。
+ */
+export function compactionSettingsFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+  return {
+    enabled: env.AISTAFF_AGENT_COMPACTION !== '0',
+    reserveTokens: positiveInt(env.AISTAFF_AGENT_COMPACTION_RESERVE_TOKENS, 16_384),
+    keepRecentTokens: positiveInt(env.AISTAFF_AGENT_COMPACTION_KEEP_TOKENS, 20_000),
+  };
+}
+
 /**
  * pi-coding-agent 库化封装（服务端进程内运行，非 CLI 子进程）。
  * 模型凭证为平台级配置：AISTAFF_MODEL_API_KEY（配 AISTAFF_MODEL_PROVIDER，缺省 anthropic）
@@ -73,7 +94,7 @@ export class PiAgentRunner implements AgentRunner {
     }
 
     const settingsManager = pi.SettingsManager.inMemory({
-      compaction: { enabled: false },
+      compaction: compactionSettingsFromEnv(),
     });
 
     const loader = new pi.DefaultResourceLoader({
@@ -122,6 +143,15 @@ export class PiAgentRunner implements AgentRunner {
               toolName: ev.toolName,
               isError: Boolean(ev.isError),
               resultPreview: preview(ev.result, 400),
+            });
+          } else if (ev.type === 'compaction_end') {
+            emit({
+              type: 'compaction',
+              reason: ev.reason,
+              ok: !ev.aborted && !ev.errorMessage,
+              tokensBefore: ev.result?.tokensBefore,
+              estimatedTokensAfter: ev.result?.estimatedTokensAfter,
+              errorMessage: ev.errorMessage,
             });
           } else if (ev.type === 'message_update') {
             const aev = ev.assistantMessageEvent as { type: string; content?: string };
