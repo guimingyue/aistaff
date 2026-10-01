@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createDwsTools } from '../agent-tools/dws-tools';
 import { AgentRunner, RunTurnRequest, RunTurnResult } from './agent-runner';
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -38,6 +39,22 @@ export function compactionSettingsFromEnv(
     reserveTokens: positiveInt(env.AISTAFF_AGENT_COMPACTION_RESERVE_TOKENS, 16_384),
     keepRecentTokens: positiveInt(env.AISTAFF_AGENT_COMPACTION_KEEP_TOKENS, 20_000),
   };
+}
+
+/**
+ * 组织侧工具注册条件：员工显式声明了工具白名单，且三方账号绑定校验通过（有专属 CLI profile）。
+ * 未声明 tools 的默认档沿用 pi 内置工具，不因代码升级就凭空获得触碰组织系统的入口。
+ */
+export function shouldRegisterOrgTools(req: Pick<RunTurnRequest, 'cliEnv' | 'tools'>): boolean {
+  return Boolean(req.cliEnv && req.tools && req.tools.length > 0);
+}
+
+/**
+ * 模型是否接受图片输入。pi 对不支持图像的模型会静默省略图片附件，员工就会"没看见图还照答"，
+ * 所以带图的轮次必须在发请求之前显式拒绝。
+ */
+export function modelAcceptsImages(model: { input?: readonly string[] } | undefined): boolean {
+  return Boolean(model?.input?.includes('image'));
 }
 
 /**
@@ -130,8 +147,20 @@ export class PiAgentRunner implements AgentRunner {
         Object.assign(options, { tools: req.tools });
       }
     }
+    // 组织侧工具只在员工显式声明工具白名单且账号绑定校验通过时注册
+    if (shouldRegisterOrgTools(req)) {
+      Object.assign(options, {
+        customTools: createDwsTools({ bin: process.env.AISTAFF_DWS_BIN ?? 'dws', env: req.cliEnv! }) as never,
+      });
+    }
 
     const { session } = await pi.createAgentSession(options);
+    if (req.images?.length && session.model && !modelAcceptsImages(session.model)) {
+      session.dispose();
+      throw new Error(
+        `model ${session.model.provider}/${session.model.id} does not accept image input; attach images only to a vision-capable model`,
+      );
+    }
     const emit = req.onEvent;
     const unsubscribe = emit
       ? session.subscribe((ev) => {
@@ -171,7 +200,7 @@ export class PiAgentRunner implements AgentRunner {
       req.signal.addEventListener('abort', onAbort, { once: true });
     }
     try {
-      await session.prompt(req.message);
+      await session.prompt(req.message, req.images?.length ? { images: req.images } : undefined);
       if (req.signal?.aborted) {
         throw new Error(`employee ${req.employeeNo}: agent turn cancelled`);
       }

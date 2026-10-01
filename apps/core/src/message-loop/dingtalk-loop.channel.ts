@@ -1,8 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { DingtalkAdapter, isolatedEnv } from '../connections/dingtalk.adapter';
 import { runCli, parseJsonLoose, cliIdArg, cliTextArg } from '../connections/cli-invoker';
-import { InboundMessage, LoopChannel, LoopProvider } from './channel';
+import { InboundMessage, InboundMedia, LoopChannel, LoopProvider } from './channel';
+import { mediaLimitsFromEnv, parseResourceLedger, readImagesFromLedger } from './media';
+
+/** 图片落盘子目录：平台生成的常量，绝不来自消息内容 */
+const MEDIA_SUBDIR = 'inbox';
 
 interface AtEventPayload {
   type?: string;
@@ -89,6 +94,44 @@ export class DwsAtChannel implements LoopChannel {
     if (res.code !== 0 || parsed?.success === false) {
       throw new Error(`dingtalk send failed (exit=${res.code}): ${(res.stderr || res.stdout).slice(0, 300)}`);
     }
+  }
+
+  /**
+   * 取回一条消息附带的图片：`chat +messages-mget --download-resources` 把工作目录内的相对路径
+   * 落盘并回逐资源台账，因此 CLI 的工作目录必须是该员工的 workspace（cwd 参数）。
+   * 台账只分 mediaId/fileId，不区分图片与视频，类型判定交给文件头。
+   */
+  async fetchImages(messageId: string, workspaceDir: string): Promise<InboundMedia> {
+    // CLI 以 workspaceDir 为工作目录（--output-dir 只收相对路径），首轮时目录可能还不存在
+    mkdirSync(workspaceDir, { recursive: true });
+    const res = await runCli(
+      this.bin,
+      [
+        'chat',
+        '+messages-mget',
+        cliIdArg('msg-ids', messageId),
+        '--download-resources',
+        '--no-threads',
+        '--no-reactions',
+        `--output-dir=${MEDIA_SUBDIR}`,
+        '-f',
+        'json',
+      ],
+      this.env,
+      workspaceDir,
+    );
+    if (res.code !== 0) {
+      throw new Error(
+        `dingtalk resource download failed (exit=${res.code}): ${(res.stderr || res.stdout).slice(0, 300)}`,
+      );
+    }
+    const ledger = parseResourceLedger(parseJsonLoose(res.stdout));
+    const images = await readImagesFromLedger(ledger, workspaceDir, mediaLimitsFromEnv());
+    return {
+      images,
+      discoveredCount: ledger.discoveredCount,
+      skippedCount: Math.max(ledger.discoveredCount - images.length, 0),
+    };
   }
 
   async stop(): Promise<void> {

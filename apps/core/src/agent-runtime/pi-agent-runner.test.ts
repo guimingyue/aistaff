@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { compactionSettingsFromEnv } from './pi-agent-runner';
+import {
+  compactionSettingsFromEnv,
+  modelAcceptsImages,
+  shouldRegisterOrgTools,
+} from './pi-agent-runner';
 
 describe('会话压缩配置（env 驱动）', () => {
   it('缺省开启，并沿用 pi 内置阈值', () => {
@@ -32,5 +36,35 @@ describe('会话压缩配置（env 驱动）', () => {
         `非法值 ${JSON.stringify(bad)} 应回落默认`,
       );
     }
+  });
+});
+
+describe('组织侧工具的注册闸门', () => {
+  const cliEnv = { HOME: '/tmp/aistaff-profile' } as NodeJS.ProcessEnv;
+
+  it('显式声明非空白名单且绑定校验通过才注册', () => {
+    assert.equal(shouldRegisterOrgTools({ cliEnv, tools: ['dws_doc_read'] }), true);
+  });
+
+  it('默认档与空白名单都不注册：外部副作用面必须逐个点名开启', () => {
+    assert.equal(shouldRegisterOrgTools({ cliEnv }), false);
+    assert.equal(shouldRegisterOrgTools({ cliEnv, tools: [] }), false);
+  });
+
+  it('账号未绑定时即使点名了工具也不注册', () => {
+    assert.equal(shouldRegisterOrgTools({ tools: ['dws_doc_read'] }), false);
+  });
+});
+
+describe('入站图片的模型准入门禁', () => {
+  it('只有声明 image 输入的模型才收图片', () => {
+    assert.equal(modelAcceptsImages({ input: ['text', 'image'] }), true);
+    assert.equal(modelAcceptsImages({ input: ['text'] }), false);
+    assert.equal(modelAcceptsImages({ input: [] }), false);
+  });
+
+  it('模型未知或未声明输入时按不收处理，宁可拒绝也不静默丢图', () => {
+    assert.equal(modelAcceptsImages({}), false);
+    assert.equal(modelAcceptsImages(undefined), false);
   });
 });

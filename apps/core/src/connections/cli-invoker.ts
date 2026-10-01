@@ -8,13 +8,19 @@ export interface CliResult {
 
 /**
  * 一律 argv 数组 + execFile（无 shell），杜绝消息内容/外部 ID 拼接 shell 的注入面。
+ * cwd 用于把 CLI 的"工作目录"钉到员工 workspace——dws 的下载类命令只接受工作目录内的相对路径。
  */
-export function runCli(bin: string, args: string[], env: NodeJS.ProcessEnv): Promise<CliResult> {
+export function runCli(
+  bin: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd?: string,
+): Promise<CliResult> {
   return new Promise((resolve) => {
     execFile(
       bin,
       args,
-      { env, maxBuffer: 10 * 1024 * 1024, timeout: 60_000 },
+      { env, maxBuffer: 10 * 1024 * 1024, timeout: 60_000, ...(cwd ? { cwd } : {}) },
       (err, stdout, stderr) => {
         const code =
           err && typeof (err as { code?: unknown }).code === 'number'

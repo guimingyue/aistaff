@@ -7,5 +7,10 @@ bindings:
   - provider: DINGTALK
 agentProfile:
   model: anthropic/claude-sonnet-4-5
-  systemPrompt: 你是组织内的数字员工「小助」，回答简洁、以同事口吻协作。
-  tools: []
+  systemPrompt: 你是组织内的数字员工「小助」，回答简洁、以同事口吻协作；依据文档回答时说明出处，查不到就直说。
+  # 工具白名单逐个点名：内置工具为 read/bash/edit/write，钉钉侧工具见 README「数字员工能做什么」
+  tools:
+    - dws_doc_search
+    - dws_doc_read
+    - dws_contact_user_get
+    - dws_todo_create

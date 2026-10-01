@@ -10,14 +10,17 @@ import { StaffService } from '../staff/staff.service';
 import { ChatService } from '../agent-runtime/chat.service';
 import { AgentRunner, RunTurnRequest, RunTurnResult } from '../agent-runtime/agent-runner';
 import { MessageLoopService } from './message-loop.service';
-import { InboundMessage, LoopChannel, LoopProvider } from './channel';
+import { InboundMedia, InboundMessage, LoopChannel, LoopProvider } from './channel';
 import type { EmployeeConfig } from '../config/employee-config.schema';
 
 class FakeChannel implements LoopChannel {
   handlers?: { onMessage(m: InboundMessage): void; onDiagnostic(l: string): void; onExit(c: number | null): void };
   readonly sent: Array<{ to: string; text: string }> = [];
+  readonly mediaCalls: Array<{ messageId: string; workspaceDir: string }> = [];
   sendFail = false;
   stopped = 0;
+  mediaResult: InboundMedia = { images: [], discoveredCount: 0, skippedCount: 0 };
+  mediaFail: Error | undefined;
 
   async start(
     handlers: {
@@ -31,6 +34,11 @@ class FakeChannel implements LoopChannel {
   async send(to: string, text: string) {
     if (this.sendFail) throw new Error(`回发失败到 ${to}`);
     this.sent.push({ to, text });
+  }
+  async fetchImages(messageId: string, workspaceDir: string): Promise<InboundMedia> {
+    this.mediaCalls.push({ messageId, workspaceDir });
+    if (this.mediaFail) throw this.mediaFail;
+    return this.mediaResult;
   }
   async stop() {
     this.stopped += 1;
@@ -293,13 +301,112 @@ describe('message-loop @消息闭环（假通道+假Runner + 真实 SQLite 双�
     assert.equal(channel.sent.length, sentBefore + 1, '重复事件不得二次回发');
   });
 
-  it('非文本消息：一期降级为暂不支持提示，不触发 Agent', async () => {
+  it('非文本消息：降级为暂不支持提示，不触发 Agent', async () => {
     const runsBefore = runner.requests.length;
     const sentBefore = channel.sent.length;
     channel.emit(ev({ eventId: 'evt-non-text', content: '' }));
     await waitFor(() => channel.sent.length === sentBefore + 1);
-    assert.match(channel.sent.at(-1)!.text, /暂不支持|只能处理文本/);
+    assert.match(channel.sent.at(-1)!.text, /没有我能处理的内容/);
     assert.equal(runner.requests.length, runsBefore);
+    assert.equal(channel.mediaCalls.length, 0, '无 messageId 时不得凭空探测资源');
+  });
+
+  it('纯文本不探测资源：不多花一次 CLI 往返', async () => {
+    const callsBefore = channel.mediaCalls.length;
+    const runsBefore = runner.requests.length;
+    channel.emit(ev({ eventId: 'evt-text-no-media', messageId: 'msg-plain', content: '这个链接 https://a.com/x?file=1 看下' }));
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    assert.equal(channel.mediaCalls.length, callsBefore, '正文没有资源标记就不该调用取图');
+    assert.equal(runner.requests.at(-1)!.images, undefined);
+  });
+
+  it('正文带 mediaId 标记：取图后连同原文交给 Agent，并记 message.media 审计', async () => {
+    channel.mediaResult = {
+      images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+      discoveredCount: 1,
+      skippedCount: 0,
+    };
+    const runsBefore = runner.requests.length;
+    channel.emit(
+      ev({
+        eventId: 'evt-img-with-text',
+        messageId: 'msg-att-1',
+        content: '这张图里的报错是什么意思？\n[图片] mediaId:med-1',
+      }),
+    );
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    const req = runner.requests.at(-1)!;
+    assert.deepEqual(req.images, [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
+    assert.match(req.message, /这张图里的报错是什么意思？/);
+    assert.equal(channel.mediaCalls.at(-1)!.messageId, 'msg-att-1');
+    assert.ok(channel.mediaCalls.at(-1)!.workspaceDir.endsWith(join('workspaces', 'AI000001')));
+    const mediaAudit = audits.find((a) => a.action === 'message.media');
+    assert.ok(mediaAudit, '缺资源审计');
+    assert.match(JSON.stringify(mediaAudit!.detail), /"images":1/);
+  });
+
+  it('只发图片没有文字：带图进 Agent，问题文本给出图片说明', async () => {
+    channel.mediaResult = {
+      images: [{ data: 'SU1H', mimeType: 'image/png' }],
+      discoveredCount: 1,
+      skippedCount: 0,
+    };
+    const runsBefore = runner.requests.length;
+    channel.emit(ev({ eventId: 'evt-img-only', messageId: 'msg-att-2', content: '' }));
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    assert.equal(runner.requests.at(-1)!.message, '（发来 1 张图片）');
+    assert.equal(runner.requests.at(-1)!.images?.length, 1);
+    assert.equal(channel.sent.at(-1)!.text, '答：（发来 1 张图片）');
+  });
+
+  it('超上限的附件：问题里显式说明有几个没读到，员工不会以为图都看完了', async () => {
+    channel.mediaResult = {
+      images: [{ data: 'SU1H', mimeType: 'image/png' }],
+      discoveredCount: 3,
+      skippedCount: 2,
+    };
+    const runsBefore = runner.requests.length;
+    channel.emit(ev({ eventId: 'evt-img-partial', messageId: 'msg-att-3', content: '' }));
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    assert.match(runner.requests.at(-1)!.message, /另有 2 个附件没能读取/);
+  });
+
+  it('只有视频/文件资源：回媒体专用降级文案且不触发 Agent', async () => {
+    channel.mediaResult = { images: [], discoveredCount: 1, skippedCount: 1 };
+    const runsBefore = runner.requests.length;
+    const sentBefore = channel.sent.length;
+    channel.emit(ev({ eventId: 'evt-video-only', messageId: 'msg-att-4', content: '' }));
+    await waitFor(() => channel.sent.length === sentBefore + 1);
+    assert.match(channel.sent.at(-1)!.text, /视频、语音和文件/);
+    assert.equal(runner.requests.length, runsBefore);
+    assert.ok(audits.some((a) => JSON.stringify(a.detail)?.includes('unsupported-media')));
+  });
+
+  it('带文字的视频消息：不空转降级，正文照答并显式告知有附件没读到', async () => {
+    channel.mediaResult = { images: [], discoveredCount: 1, skippedCount: 1 };
+    const runsBefore = runner.requests.length;
+    channel.emit(
+      ev({
+        eventId: 'evt-video-with-text',
+        messageId: 'msg-att-6',
+        content: '这个会议视频讲了什么重点？\nmediaId:med-10',
+      }),
+    );
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    assert.match(runner.requests.at(-1)!.message, /这个会议视频讲了什么重点？/);
+    assert.match(runner.requests.at(-1)!.message, /另有 1 个附件没能读取/);
+    assert.equal(runner.requests.at(-1)!.images, undefined);
+  });
+
+  it('取图失败不阻断回复：有正文就照正文回答，并记 message.media.error', async () => {
+    channel.mediaFail = new Error('资源下载超时');
+    const runsBefore = runner.requests.length;
+    channel.emit(ev({ eventId: 'evt-media-fail', messageId: 'msg-att-5', content: '图没发出去，先看文字：mediaId:med-8' }));
+    await waitFor(() => runner.requests.length === runsBefore + 1);
+    assert.equal(runner.requests.at(-1)!.images, undefined);
+    assert.ok(audits.some((a) => a.action === 'message.media.error' && JSON.stringify(a.detail)?.includes('资源下载超时')));
+    channel.mediaFail = undefined;
+    channel.mediaResult = { images: [], discoveredCount: 0, skippedCount: 0 };
   });
 
   it('Agent 或回发失败：记 message.error 审计且闭环存活', async () => {

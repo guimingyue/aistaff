@@ -1,3 +1,9 @@
+export interface AgentImage {
+  /** base64，不含 data: 前缀 */
+  data: string;
+  mimeType: string;
+}
+
 export interface RunTurnRequest {
   employeeNo: string;
   /** 员工显示名，人格缺省组装用 */
@@ -9,8 +15,15 @@ export interface RunTurnRequest {
   /** 工具白名单；undefined=运行时默认，[]=显式禁用全部工具 */
   tools?: string[];
   message: string;
+  /** 随消息附带的图片（base64，无 data: 前缀）；模型不支持图像输入时运行时应拒绝而不是静默丢弃 */
+  images?: AgentImage[];
   /** data/workspaces/<employeeNo>/，员工文件类工具的工作目录 */
   workspaceDir: string;
+  /**
+   * 该员工三方 CLI 的隔离环境（专属 profile 目录）。缺省表示员工尚未绑定外部账号，
+   * 此时不注册任何会触碰组织系统的工具。
+   */
+  cliEnv?: NodeJS.ProcessEnv;
   /** 既有 pi 会话档案路径；undefined 表示新会话 */
   sessionFile?: string;
   /** 取消信号：超时或停机时中止本轮（运行时应尽快释放模型连接与子进程） */

@@ -3,7 +3,8 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { AGENT_RUNNER, AgentRunner, AgentStepEvent, RunTurnRequest } from './agent-runner';
+import { isolatedEnv } from '../connections/dingtalk.adapter';
+import { AGENT_RUNNER, AgentImage, AgentRunner, AgentStepEvent, RunTurnRequest } from './agent-runner';
 
 export interface ChatResult {
   employeeNo: string;
@@ -25,6 +26,8 @@ export interface ChatOptions {
   senderExternalUserId?: string;
   /** 取消信号：消息回路超时或停机时中止本轮 Agent 运行 */
   signal?: AbortSignal;
+  /** 随本轮入站消息附带的图片（由消息回路取回后传入） */
+  images?: AgentImage[];
 }
 
 @Injectable()
@@ -76,7 +79,7 @@ export class ChatService {
   ): Promise<ChatResult> {
     const employee = await this.prisma.staff.employee.findUnique({
       where: { employeeNo },
-      include: { agentProfile: true },
+      include: { agentProfile: true, bindings: true },
     });
     if (!employee) throw new Error(`employee ${employeeNo} does not exist`);
     if (employee.status !== 'ACTIVE') {
@@ -122,7 +125,12 @@ export class ChatService {
     ctx.conversationId = conversation.id;
 
     const tools = profile.tools ? (JSON.parse(profile.tools) as string[]) : undefined;
+    // 外部系统工具依赖该员工的三方 CLI 登录态目录；只读校验通过（BOUND）后才注册，未绑定员工仍可正常对话
+    const cliProfileDir = employee.bindings.find(
+      (b) => b.provider === 'DINGTALK' && b.bindingStatus === 'BOUND',
+    )?.cliProfileDir;
     const steps: AgentStepEvent[] = [];
+    const toolAuditWrites: Promise<unknown>[] = [];
     const turnReq: RunTurnRequest = {
       employeeNo,
       name: employee.name,
@@ -132,10 +140,25 @@ export class ChatService {
       model: profile.model ?? undefined,
       tools,
       message,
+      images: opts.images?.length ? opts.images : undefined,
       workspaceDir: this.workspaceDir(employeeNo),
+      cliEnv: cliProfileDir ? isolatedEnv(cliProfileDir) : undefined,
       sessionFile: conversation.agentSessionFile ?? undefined,
       signal: opts.signal,
-      onEvent: (ev) => steps.push(ev),
+      onEvent: (ev) => {
+        steps.push(ev);
+        // 工具结果一落地就留痕：本轮超时或被中止时，已经发生的外部副作用同样必须可查
+        if (ev.type === 'tool_result') {
+          toolAuditWrites.push(
+            this.audit.record({
+              actor: opts.actor,
+              action: 'agent.tool',
+              target: `${employeeNo}/${conversation.id}`,
+              detail: { toolName: ev.toolName, isError: ev.isError },
+            }),
+          );
+        }
+      },
     };
     mkdirSync(turnReq.workspaceDir, { recursive: true });
 
@@ -148,7 +171,10 @@ export class ChatService {
       },
     });
 
-    const result = await this.runner.runTurn(turnReq);
+    // finally 保证本轮被超时或中止打断时，已产生的工具审计同样落库
+    const result = await this.runner
+      .runTurn(turnReq)
+      .finally(() => Promise.allSettled(toolAuditWrites));
     const durationMs = Date.now() - startedAt;
 
     await this.prisma.sessions.message.create({
@@ -170,6 +196,7 @@ export class ChatService {
         model: result.modelUsed ?? profile.model ?? null,
         durationMs,
         userChars: message.length,
+        images: opts.images?.length ?? 0,
         replyChars: result.replyText.length,
         steps: steps.length,
         sessionFile: result.sessionFile,

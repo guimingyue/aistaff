@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -74,5 +74,99 @@ describe('dingtalk 通道 argv 契约（假 CLI）', () => {
     );
     assert.equal(res.code, 2);
     assert.match(res.stderr, /requires/);
+  });
+
+  describe('入站图片取回', () => {
+    const mediaChannel = (extra: Record<string, string>) =>
+      new DwsAtChannel(
+        FAKE_BIN,
+        isolatedEnv(join(dir, 'media-profile'), {
+          FAKE_ARGV_OUT: argvOut.file,
+          FAKE_MSG_RESOURCES: JSON.stringify({
+            'msg-1': [
+              { resourceId: 'med-1', kind: 'png' },
+              { resourceId: 'med-2', kind: 'mp4' },
+            ],
+          }),
+          ...extra,
+        }),
+      );
+
+    it('argv 契约与工作目录：图片落在员工 workspace 内，非图片资源被跳过', async () => {
+      const ws = join(dir, 'ws-media');
+      mkdirSync(ws, { recursive: true });
+      const media = await mediaChannel({}).fetchImages('msg-1', ws);
+      assert.deepEqual(argvLines(argvOut.file).at(-1)!, [
+        'chat',
+        '+messages-mget',
+        '--msg-ids=msg-1',
+        '--download-resources',
+        '--no-threads',
+        '--no-reactions',
+        '--output-dir=inbox',
+        '-f',
+        'json',
+      ]);
+      assert.equal(media.discoveredCount, 2);
+      assert.equal(media.skippedCount, 1, '视频资源不得混进图片');
+      assert.equal(media.images.length, 1);
+      assert.equal(media.images[0].mimeType, 'image/png');
+      assert.equal(Buffer.from(media.images[0].data, 'base64').subarray(1, 4).toString('ascii'), 'PNG');
+      assert.ok(existsSync(join(ws, 'inbox', 'med-1.png')), '落盘目录由平台常量决定，必须在员工 workspace 内');
+    });
+
+    it('真实 openMessageId 形态（含 / + =）作为单 argv 送达，空 ID 不落 CLI', async () => {
+      const ws = join(dir, 'ws-id');
+      mkdirSync(ws, { recursive: true });
+      await mediaChannel({}).fetchImages('msgEtfiWuSrWL8EDfCUJYV2Kw==', ws);
+      assert.equal(argvLines(argvOut.file).at(-1)![2], '--msg-ids=msgEtfiWuSrWL8EDfCUJYV2Kw==');
+      const before = argvLines(argvOut.file).length;
+      await assert.rejects(() => mediaChannel({}).fetchImages('', ws), /1-512 characters/);
+      assert.equal(argvLines(argvOut.file).length, before);
+    });
+
+    it('假 CLI 的每种图片落盘都能被文件头认出（防止过短签名桩把能力测成假绿）', async () => {
+      const ws = join(dir, 'ws-kinds');
+      mkdirSync(ws, { recursive: true });
+      // 缺省张数上限是 3，这里必须放宽才能一张不漏地验完五种签名
+      process.env.AISTAFF_MEDIA_MAX_IMAGES = '5';
+      try {
+        const media = await mediaChannel({
+          FAKE_MSG_RESOURCES: JSON.stringify({
+            'msg-kinds': [
+              { resourceId: 'k1', kind: 'png' },
+              { resourceId: 'k2', kind: 'jpeg' },
+              { resourceId: 'k3', kind: 'gif' },
+              { resourceId: 'k4', kind: 'webp' },
+              { resourceId: 'k5', kind: 'bmp' },
+            ],
+          }),
+        }).fetchImages('msg-kinds', ws);
+        assert.deepEqual(
+          media.images.map((i) => i.mimeType),
+          ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'],
+        );
+        assert.equal(media.skippedCount, 0);
+      } finally {
+        delete process.env.AISTAFF_MEDIA_MAX_IMAGES;
+      }
+    });
+
+    it('体积上限经 env 生效；CLI 失败显式抛错，不静默当成无图', async () => {
+      const ws = join(dir, 'ws-cap');
+      mkdirSync(ws, { recursive: true });
+      process.env.AISTAFF_MEDIA_MAX_IMAGE_BYTES = '1';
+      try {
+        const media = await mediaChannel({}).fetchImages('msg-1', ws);
+        assert.deepEqual(media.images, [], '超体积的图不能进上下文');
+        assert.equal(media.skippedCount, 2);
+      } finally {
+        delete process.env.AISTAFF_MEDIA_MAX_IMAGE_BYTES;
+      }
+      await assert.rejects(
+        () => mediaChannel({ FAKE_MGET_FAIL: '1' }).fetchImages('msg-1', ws),
+        /resource download failed/,
+      );
+    });
   });
 });

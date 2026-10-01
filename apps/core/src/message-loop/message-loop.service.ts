@@ -3,9 +3,11 @@ import { resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ChatService } from '../agent-runtime/chat.service';
-import { InboundMessage, LOOP_PROVIDERS, LoopChannel, LoopProvider } from './channel';
+import { InboundMedia, InboundMessage, LOOP_PROVIDERS, LoopChannel, LoopProvider } from './channel';
+import { mayCarryResources } from './media';
 
-const UNSUPPORTED_NOTICE = '抱歉，我暂时只能处理文本消息，图片/富卡片等类型支持在后续版本开放。';
+const UNSUPPORTED_NOTICE = '抱歉，这条消息里没有我能处理的内容，发文字或图片给我吧。';
+const MEDIA_UNSUPPORTED_NOTICE = '抱歉，视频、语音和文件类消息我还读不了，目前能看懂的是文字和图片。';
 const TIMEOUT_NOTICE = '抱歉，这一轮处理超时了，请稍后再 @我 一次。';
 const QUEUE_FULL_NOTICE = '抱歉，我这边积压较多，这条消息没有处理，请稍后再 @我。';
 
@@ -194,22 +196,37 @@ export class MessageLoopService {
     loop.abort.signal.addEventListener('abort', onLoopAbort, { once: true });
     const timer = setTimeout(() => turn.abort(), timeoutMs);
     try {
-      if (!msg.content.trim()) {
-        await loop.channel.send(msg.conversationId, UNSUPPORTED_NOTICE);
+      const media = await this.fetchInboundMedia(employeeNo, loop, msg, actor);
+      const images = media?.images ?? [];
+      const hasText = Boolean(msg.content.trim());
+      if (!hasText && images.length === 0) {
+        const hasResources = Boolean(media && media.discoveredCount > 0);
+        const notice = hasResources ? MEDIA_UNSUPPORTED_NOTICE : UNSUPPORTED_NOTICE;
+        await loop.channel.send(msg.conversationId, notice);
         await this.audit.record({
           actor,
           action: 'message.outbound',
           target: `${employeeNo}/${msg.conversationId}`,
-          detail: { eventId: msg.eventId, notice: 'unsupported-type', replyChars: UNSUPPORTED_NOTICE.length },
+          detail: {
+            eventId: msg.eventId,
+            notice: hasResources ? 'unsupported-media' : 'unsupported-type',
+            replyChars: notice.length,
+          },
         });
         return;
       }
-      const result = await this.chat.chat(employeeNo, msg.content, {
+      const skippedNote =
+        media && media.skippedCount > 0 ? `（另有 ${media.skippedCount} 个附件没能读取，可能是视频/语音/文件，或超出张数与体积上限）` : '';
+      const question = [hasText ? msg.content : `（发来 ${images.length} 张图片）`, skippedNote]
+        .filter(Boolean)
+        .join('\n');
+      const result = await this.chat.chat(employeeNo, question, {
         actor,
         channel: 'DINGTALK',
         externalConversationId: msg.conversationId,
         senderExternalUserId: msg.senderOpenDingTalkId ?? msg.senderName ?? undefined,
         signal: turn.signal,
+        images: images.length ? images : undefined,
       });
       await loop.channel.send(msg.conversationId, result.replyText);
       loop.processed += 1;
@@ -245,6 +262,44 @@ export class MessageLoopService {
     } finally {
       clearTimeout(timer);
       loop.abort.signal.removeEventListener('abort', onLoopAbort);
+    }
+  }
+
+  /**
+   * 取回 @消息附带的图片。取不到不该让这条消息没人回：有文字就照文字继续，
+   * 什么都没有才回降级提示，所以失败只记审计并返回 undefined。
+   */
+  private async fetchInboundMedia(
+    employeeNo: string,
+    loop: RunningLoop,
+    msg: InboundMessage,
+    actor: string,
+  ): Promise<InboundMedia | undefined> {
+    if (!msg.messageId || !loop.channel.fetchImages || !mayCarryResources(msg.content)) return undefined;
+    const target = `${employeeNo}/${msg.conversationId}`;
+    try {
+      const media = await loop.channel.fetchImages(msg.messageId, this.chat.workspaceDir(employeeNo));
+      await this.audit.record({
+        actor,
+        action: 'message.media',
+        target,
+        detail: {
+          messageId: msg.messageId,
+          discovered: media.discoveredCount,
+          images: media.images.length,
+          skipped: media.skippedCount,
+          imageBase64Chars: media.images.reduce((sum, img) => sum + img.data.length, 0),
+        },
+      });
+      return media;
+    } catch (err) {
+      await this.audit.record({
+        actor,
+        action: 'message.media.error',
+        target,
+        detail: { messageId: msg.messageId, reason: (err as Error).message },
+      });
+      return undefined;
     }
   }
 

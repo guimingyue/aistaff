@@ -139,6 +139,56 @@ describe('agent-runtime 员工对话（假 Runner + 真实 SQLite 双库）', ()
       ],
     );
     assert.ok(audits.some((a) => a.action === 'agent.run' && a.target === `AI000001/${r.conversationId}`));
+    const toolEvent = audits.find((a) => a.action === 'agent.tool');
+    assert.deepEqual(toolEvent!.detail, { toolName: 'search', isError: false });
+    assert.equal(toolEvent!.target, `AI000001/${r.conversationId}`);
+  });
+
+  it('图片入参透传给 runner 并计入审计，图片本体不落会话库', async () => {
+    const r = await chat.chat('AI000001', '这张图说什么', {
+      actor: 'tester',
+      images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+    });
+    assert.deepEqual(runner.requests.at(-1)!.images, [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
+    const runAudit = audits.find(
+      (a) => a.action === 'agent.run' && a.target === `AI000001/${r.conversationId}`,
+    )!;
+    assert.match(JSON.stringify(runAudit.detail), /"images":1/);
+    const msgs = await messagesOf(r.conversationId);
+    assert.equal(
+      JSON.stringify(msgs).includes('iVBORw0KGgo'),
+      false,
+      '图片 base64 不进会话消息，重复提问需重新附图',
+    );
+
+    await chat.chat('AI000001', '空图片数组等于没带图', { actor: 'tester', images: [] });
+    assert.equal(runner.requests.at(-1)!.images, undefined);
+  });
+
+  it('员工 CLI 环境装配：绑定 BOUND 后带上专属 profile，未绑定时不注册外部工具', async () => {
+    await chat.chat('AI000003', '未绑定也能聊', { actor: 'tester' });
+    assert.equal(runner.requests.at(-1)!.cliEnv, undefined);
+
+    const emp = await staffPrisma.employee.findUniqueOrThrow({ where: { employeeNo: 'AI000001' } });
+    const profileDir = join(dir, 'cli-profiles', 'AI000001-DINGTALK');
+    await staffPrisma.externalBinding.upsert({
+      where: { employeeId_provider: { employeeId: emp.id, provider: 'DINGTALK' } },
+      create: { employeeId: emp.id, provider: 'DINGTALK', bindingStatus: 'BOUND', cliProfileDir: profileDir },
+      update: { bindingStatus: 'BOUND', cliProfileDir: profileDir },
+    });
+    await chat.chat('AI000001', '查一下文档', { actor: 'tester' });
+    const cliEnv = runner.requests.at(-1)!.cliEnv!;
+    assert.equal(cliEnv.HOME, profileDir);
+    assert.equal(cliEnv.DWS_CONFIG_DIR, join(profileDir, '.dws'));
+    assert.equal(cliEnv.DWS_DISABLE_KEYCHAIN, '1');
+
+    // 绑定退回待校验后，外部工具环境不再下发
+    await staffPrisma.externalBinding.update({
+      where: { employeeId_provider: { employeeId: emp.id, provider: 'DINGTALK' } },
+      data: { bindingStatus: 'PENDING' },
+    });
+    await chat.chat('AI000001', '绑定掉了还能问', { actor: 'tester' });
+    assert.equal(runner.requests.at(-1)!.cliEnv, undefined);
   });
 
   it('续会话：conversationId 复用时携带上轮 sessionFile 延续上下文', async () => {
